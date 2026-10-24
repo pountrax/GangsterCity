@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Game</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- Pantalla de ingreso -->
+    <div id="login">
+        <form id="loginForm">
+            <h2>Entrar al juego</h2>
+            <p class="hint">Si el usuario no existe, se crea automáticamente.</p>
+            <input id="username" type="text" placeholder="Usuario" maxlength="20" autocomplete="username" required>
+            <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+            <button type="submit" id="loginBtn">Entrar</button>
+            <p id="loginError"></p>
+        </form>
+    </div>
+
+    <!-- Juego -->
+    <div id="game" hidden>
+        <h2>Jugadores conectados</h2>
+        <table id="scoreboard">
+            <thead>
+                <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
