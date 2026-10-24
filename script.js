@@ -12,8 +12,7 @@ const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
 const tbody = document.querySelector('#scoreboard tbody');
 
-const socket = io('https://gangstercity.onrender.com/');
-
+const socket = io('https://gangstercity.onrender.com');
 let credentials = null; // se guarda solo en memoria
 let myName = null;
 
