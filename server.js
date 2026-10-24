@@ -11,9 +11,9 @@ const io = socketIo(server, { cors: { origin: "*" } });
 app.get('/', (req, res) => res.send('Servidor funcionando 🎉'));
 
 const client = new MongoClient(process.env.MONGODB_URI);
-let users;
+let users, messages;
 
-const online = {}; // { socketId: { key, name, score } }
+const online = {}; // { socketId: { key, name, score, lastMsg } }
 
 function hashPassword(password, salt) {
     return crypto.scryptSync(password, salt, 64).toString('hex');
@@ -59,13 +59,36 @@ io.on('connection', (socket) => {
                 }
             }
 
-            online[socket.id] = { key, name: user.name, score: user.score };
+            online[socket.id] = { key, name: user.name, score: user.score, lastMsg: 0 };
             cb({ ok: true, name: user.name });
             broadcast();
+
+            // manda los últimos 50 mensajes al que acaba de entrar
+            const last = await messages.find().sort({ ts: -1 }).limit(50).toArray();
+            socket.emit('chatHistory', last.reverse().map(m => ({
+                name: m.name, text: m.text, ts: m.ts
+            })));
         } catch (err) {
             console.error(err);
             cb({ ok: false, error: 'Error del servidor, probá de nuevo.' });
         }
+    });
+
+    // mensaje de chat
+    socket.on('chat', async (text) => {
+        const p = online[socket.id];
+        if (!p) return; // solo pueden escribir los logueados
+
+        const clean = String(text || '').trim().slice(0, 200);
+        if (!clean) return;
+
+        const now = Date.now();
+        if (now - p.lastMsg < 700) return; // anti-spam: 1 mensaje cada 0,7 s
+        p.lastMsg = now;
+
+        const msg = { name: p.name, text: clean, ts: now };
+        io.emit('chat', msg);
+        try { await messages.insertOne({ ...msg }); } catch (e) { console.error(e); }
     });
 
     socket.on('disconnect', async () => {
@@ -93,7 +116,9 @@ setInterval(async () => {
 
 async function start() {
     await client.connect();
-    users = client.db('juego').collection('users');
+    const db = client.db('juego');
+    users = db.collection('users');
+    messages = db.collection('messages'); // se crea sola al guardar el primer mensaje
     server.listen(process.env.PORT || 3000, () => console.log('Servidor corriendo'));
 }
 start();

@@ -76,3 +76,53 @@ socket.on('players', (players) => {
     ctx.font = '32px Arial';
     ctx.fillText('Tu puntaje: ' + (mine ? mine.score : 0), 16, 40);
 });
+
+// ===== CHAT =====
+const chatLog = document.getElementById('chatLog');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
+
+function addMessage(m) {
+    const nearBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+
+    const div = document.createElement('div');
+    div.className = 'msg' + (m.name === myName ? ' mine' : '');
+
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const name = document.createElement('strong');
+    name.textContent = m.name + ': ';
+
+    const text = document.createElement('span');
+    text.textContent = m.text; // textContent evita que alguien inyecte código HTML
+
+    div.append(time, name, text);
+    chatLog.appendChild(div);
+
+    // máximo 100 mensajes en pantalla
+    while (chatLog.children.length > 100) chatLog.removeChild(chatLog.firstChild);
+
+    if (nearBottom || m.name === myName) chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// historial al entrar (o al reconectar)
+socket.on('chatHistory', (list) => {
+    chatLog.innerHTML = '';
+    list.forEach(addMessage);
+    chatLog.scrollTop = chatLog.scrollHeight;
+});
+
+// mensaje nuevo en vivo
+socket.on('chat', addMessage);
+
+// enviar
+chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    socket.emit('chat', text);
+    chatInput.value = '';
+    chatInput.focus();
+});
