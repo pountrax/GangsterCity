@@ -142,3 +142,19 @@ canvas {
     #chatLog { height: 180px; font-size: 14px; }
     #chat { padding: 10px; }
 }
+/* Punto verde de "conectado" */
+.dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    margin-right: 6px;
+    border-radius: 50%;
+    background: #22c55e;
+}
+
+/* El ranking ahora está fuera de #game */
+#scoreWrap {
+    max-width: 800px;
+    max-height: 220px;
+}
+#login { margin-top: 4px; }
