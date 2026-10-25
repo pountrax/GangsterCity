@@ -8,8 +8,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
-app.get('/', (req, res) => res.send('Servidor funcionando 🎉'));
-
+app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v2 ranking global'));
 const client = new MongoClient(process.env.MONGODB_URI);
 let users, messages;
 
