@@ -13,14 +13,41 @@ app.get('/', (req, res) => res.send('Servidor funcionando 🎉'));
 const client = new MongoClient(process.env.MONGODB_URI);
 let users, messages;
 
-const online = {}; // { socketId: { key, name, score, lastMsg } }
+const online = {};   // { socketId: { key, name, score, lastMsg } }
+let topCache = [];   // top 50 guardado en la base (incluye desconectados)
 
 function hashPassword(password, salt) {
     return crypto.scryptSync(password, salt, 64).toString('hex');
 }
 
+// recarga el top 50 desde la base
+async function refreshTop() {
+    try {
+        topCache = await users
+            .find({}, { projection: { name: 1, score: 1 } })
+            .sort({ score: -1 })
+            .limit(50)
+            .toArray();
+    } catch (e) { console.error(e); }
+}
+
+// arma el ranking: conectados (puntaje en vivo) + desconectados (de la base)
+function buildRanking() {
+    const onlineList = Object.values(online);
+    const onlineKeys = new Set(onlineList.map(p => p.key));
+
+    const offline = topCache
+        .filter(u => !onlineKeys.has(u._id))
+        .map(u => ({ name: u.name, score: u.score, online: false }));
+
+    return [
+        ...onlineList.map(p => ({ name: p.name, score: p.score, online: true })),
+        ...offline
+    ].sort((a, b) => b.score - a.score);
+}
+
 function broadcast() {
-    io.emit('players', Object.values(online).map(p => ({ name: p.name, score: p.score })));
+    io.emit('players', buildRanking());
 }
 
 async function saveScores(list) {
@@ -31,6 +58,9 @@ async function saveScores(list) {
 }
 
 io.on('connection', (socket) => {
+    // el ranking se ve apenas entrás, incluso antes de iniciar sesión
+    socket.emit('players', buildRanking());
+
     socket.on('auth', async (data, cb) => {
         try {
             const name = String(data?.name || '').trim().slice(0, 20);
@@ -63,7 +93,6 @@ io.on('connection', (socket) => {
             cb({ ok: true, name: user.name });
             broadcast();
 
-            // manda los últimos 50 mensajes al que acaba de entrar
             const last = await messages.find().sort({ ts: -1 }).limit(50).toArray();
             socket.emit('chatHistory', last.reverse().map(m => ({
                 name: m.name, text: m.text, ts: m.ts
@@ -74,16 +103,15 @@ io.on('connection', (socket) => {
         }
     });
 
-    // mensaje de chat
     socket.on('chat', async (text) => {
         const p = online[socket.id];
-        if (!p) return; // solo pueden escribir los logueados
+        if (!p) return;
 
         const clean = String(text || '').trim().slice(0, 200);
         if (!clean) return;
 
         const now = Date.now();
-        if (now - p.lastMsg < 700) return; // anti-spam: 1 mensaje cada 0,7 s
+        if (now - p.lastMsg < 700) return;
         p.lastMsg = now;
 
         const msg = { name: p.name, text: clean, ts: now };
@@ -94,14 +122,15 @@ io.on('connection', (socket) => {
     socket.on('disconnect', async () => {
         const p = online[socket.id];
         delete online[socket.id];
-        broadcast();
         if (p) {
             try { await saveScores([p]); } catch (e) { console.error(e); }
+            await refreshTop();   // para que quede con su puntaje final
         }
+        broadcast();
     });
 });
 
-// +1 punto por segundo a cada conectado; guarda en la base cada 10 segundos
+// +1 punto por segundo a cada conectado; guarda y refresca el top cada 10 s
 let ticks = 0;
 setInterval(async () => {
     const list = Object.values(online);
@@ -111,6 +140,7 @@ setInterval(async () => {
     ticks++;
     if (ticks % 10 === 0) {
         try { await saveScores(list); } catch (e) { console.error(e); }
+        await refreshTop();
     }
 }, 1000);
 
@@ -118,7 +148,8 @@ async function start() {
     await client.connect();
     const db = client.db('juego');
     users = db.collection('users');
-    messages = db.collection('messages'); // se crea sola al guardar el primer mensaje
+    messages = db.collection('messages');
+    await refreshTop();
     server.listen(process.env.PORT || 3000, () => console.log('Servidor corriendo'));
 }
 start();

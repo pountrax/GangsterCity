@@ -8,6 +8,17 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
+    <!-- Ranking global: siempre visible -->
+    <h2>🏆 Ranking global</h2>
+    <div id="scoreWrap">
+        <table id="scoreboard">
+            <thead>
+                <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
     <!-- Pantalla de ingreso -->
     <div id="login">
         <form id="loginForm">
@@ -22,26 +33,16 @@
 
     <!-- Juego -->
     <div id="game" hidden>
-        <h2>Jugadores conectados</h2>
-       <h2>Jugadores conectados</h2>
-        <div id="scoreWrap">
-            <table id="scoreboard">
-                <thead>
-                    <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
-                </thead>
-                <tbody></tbody>
-            </table>
-        </div>
-<canvas id="gameCanvas"></canvas>
         <canvas id="gameCanvas"></canvas>
+
         <div id="chat">
-    <h2>Chat global</h2>
-    <div id="chatLog"></div>
-    <form id="chatForm">
-        <input id="chatInput" type="text" placeholder="Escribí un mensaje..." maxlength="200" autocomplete="off">
-        <button type="submit">Enviar</button>
-    </form>
-</div>
+            <h2>Chat global</h2>
+            <div id="chatLog"></div>
+            <form id="chatForm">
+                <input id="chatInput" type="text" placeholder="Escribí un mensaje..." maxlength="200" autocomplete="off">
+                <button type="submit">Enviar</button>
+            </form>
+        </div>
     </div>
 
     <script src="script.js"></script>
