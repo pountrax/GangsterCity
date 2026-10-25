@@ -1,6 +1,10 @@
+* { box-sizing: border-box; }
+
 body {
     margin: 0;
     min-height: 100vh;
+    min-height: 100dvh;
+    padding: 12px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -9,54 +13,76 @@ body {
     font-family: Arial, sans-serif;
 }
 
-canvas {
-    border: 1px solid black;
-    max-width: 100%;
-    background: white;
-}
+h2 { margin: 0 0 8px; }
 
+/* ===== Juego ===== */
 #game {
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: 100%;
+    max-width: 800px;
 }
 #game[hidden], #login[hidden] { display: none; }
 
-#scoreboard {
-    border-collapse: collapse;
+canvas {
+    width: 100%;
+    height: auto;          /* mantiene la proporción 800x400 */
+    max-width: 800px;
+    border: 1px solid black;
     background: white;
-    margin-bottom: 20px;
-    min-width: 300px;
+}
+
+/* ===== Tabla de jugadores ===== */
+#scoreWrap {
+    width: 100%;
+    max-height: 200px;     /* si hay muchos jugadores, tiene scroll */
+    overflow-y: auto;
+    margin-bottom: 16px;
+    background: white;
+    border: 1px solid #ccc;
+}
+#scoreboard {
+    width: 100%;
+    border-collapse: collapse;
 }
 #scoreboard th, #scoreboard td {
     border: 1px solid #ccc;
-    padding: 6px 14px;
+    padding: 6px 10px;
     text-align: center;
+    word-break: break-word;
 }
-#scoreboard th { background: #ddd; }
+#scoreboard th {
+    background: #ddd;
+    position: sticky;
+    top: 0;
+}
 #scoreboard .me { background: #fff3b0; font-weight: bold; }
 
-/* Login */
+/* ===== Login ===== */
+#login { width: 100%; display: flex; justify-content: center; }
 #loginForm {
     background: white;
-    padding: 28px 32px;
+    padding: 24px;
     border-radius: 12px;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
     display: flex;
     flex-direction: column;
     gap: 12px;
-    width: 280px;
+    width: 100%;
+    max-width: 340px;
 }
-#loginForm h2 { margin: 0; text-align: center; }
+#loginForm h2 { text-align: center; }
 #loginForm .hint { margin: 0; font-size: 13px; color: #666; text-align: center; }
 #loginForm input {
-    padding: 10px;
-    font-size: 16px;
+    padding: 12px;
+    font-size: 16px;       /* 16px evita el zoom automático en iPhone */
     border: 1px solid #ccc;
     border-radius: 6px;
+    width: 100%;
 }
 #loginForm button {
-    padding: 10px;
+    padding: 12px;
     font-size: 16px;
     border: none;
     border-radius: 6px;
@@ -66,18 +92,17 @@ canvas {
 }
 #loginForm button:disabled { background: #93a8d6; cursor: wait; }
 #loginError { margin: 0; color: #c0392b; font-size: 14px; text-align: center; min-height: 18px; }
-/* Chat */
+
+/* ===== Chat ===== */
 #chat {
-    width: 800px;
-    max-width: 100%;
-    margin-top: 20px;
+    width: 100%;
+    margin-top: 16px;
     background: white;
     border: 1px solid #ccc;
     border-radius: 10px;
     padding: 12px;
-    box-sizing: border-box;
 }
-#chat h2 { margin: 0 0 8px; font-size: 18px; }
+#chat h2 { font-size: 18px; }
 #chatLog {
     height: 220px;
     overflow-y: auto;
@@ -87,23 +112,33 @@ canvas {
     background: #fafafa;
     font-size: 15px;
 }
-#chatLog .msg { margin-bottom: 4px; word-wrap: break-word; }
+#chatLog .msg { margin-bottom: 4px; word-wrap: break-word; overflow-wrap: anywhere; }
 #chatLog .time { color: #999; font-size: 12px; margin-right: 6px; }
 #chatLog .mine strong { color: #2563eb; }
 #chatForm { display: flex; gap: 8px; margin-top: 8px; }
 #chatInput {
     flex: 1;
-    padding: 10px;
+    min-width: 0;          /* deja que el input se achique en pantallas chicas */
+    padding: 12px;
     font-size: 16px;
     border: 1px solid #ccc;
     border-radius: 6px;
 }
 #chatForm button {
-    padding: 10px 16px;
+    padding: 12px 16px;
     font-size: 16px;
     border: none;
     border-radius: 6px;
     background: #2563eb;
     color: white;
     cursor: pointer;
+}
+
+/* ===== Celulares ===== */
+@media (max-width: 600px) {
+    body { padding: 8px; justify-content: flex-start; }
+    #scoreWrap { max-height: 150px; }
+    #scoreboard th, #scoreboard td { padding: 5px 6px; font-size: 14px; }
+    #chatLog { height: 180px; font-size: 14px; }
+    #chat { padding: 10px; }
 }
