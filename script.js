@@ -1,97 +1,101 @@
 // ============================================================
 // script.js — Lo que corre en el NAVEGADOR del jugador
-// Qué hace este archivo, en una frase:
-// Es la parte "visible" del juego. Se encarga de mostrar la pantalla
-// de login, dibujar el puntaje, mostrar la tabla de posiciones y el
-// chat. NO calcula puntajes ni guarda contraseñas: solo pide cosas
-// al servidor (server.js) y muestra lo que el servidor le devuelve.
+// Se encarga de mostrar el login, el panel del personaje, el menú,
+// las misiones, el inventario, el ranking y el chat.
+// NO calcula puntajes, dinero ni energía: solo pide cosas al
+// servidor (server.js) y muestra lo que el servidor devuelve.
 // ============================================================
 
-// Buscamos en la página HTML el "lienzo" (canvas) donde se dibuja el puntaje.
-const canvas = document.getElementById('gameCanvas');
-// "ctx" es como el "pincel" que usamos para dibujar sobre ese lienzo.
-const ctx = canvas.getContext('2d');
-// Le damos un tamaño fijo al lienzo (800 píxeles de ancho, 400 de alto).
-canvas.width = 800;
-canvas.height = 400;
-
-// Buscamos en el HTML las distintas "cajas" y elementos que vamos a usar:
-const loginBox = document.getElementById('login');
-const gameBox = document.getElementById('game');
+// ---------- Elementos del HTML que vamos a usar ----------
+const loginBox = document.getElementById('login');      // caja de login.
+const gameBox = document.getElementById('game');        // caja del juego.
 const form = document.getElementById('loginForm');
 const inputUser = document.getElementById('username');
 const inputPass = document.getElementById('password');
 const loginBtn = document.getElementById('loginBtn');
 const loginError = document.getElementById('loginError');
-const tbody = document.querySelector('#scoreboard tbody');
+const tbody = document.querySelector('#scoreboard tbody'); // cuerpo de la tabla de ranking.
+
+// Elementos del recuadro del personaje.
+const avatar = document.getElementById('avatar');
+const nameValue = document.getElementById('nameValue');
+const scoreValue = document.getElementById('scoreValue');
+
 // Conectamos al servidor que está en Render.
 const socket = io('https://gangstercity.onrender.com');
-// Guardamos en memoria (solo mientras la página está abierta) el usuario
-// y la contraseña, para poder reconectarnos solos si se corta internet.
-// La contraseña NO se guarda en el disco: solo vive en la memoria del navegador.
-let credentials = null; // se guarda solo en memoria
-// Guardamos el nombre del jugador logueado, para resaltar su fila en la tabla.
+
+// Usuario y contraseña, SOLO en memoria, para reconectar solos si se corta internet.
+let credentials = null;
+// Nombre del jugador logueado (sirve para resaltar su fila y sus mensajes).
 let myName = null;
 
-// Recordamos el último usuario que usó esta computadora (para no tener que
-// escribirlo de nuevo). La contraseña NO se recuerda.
+// Recordamos el último usuario usado (la contraseña NO se recuerda).
 try { inputUser.value = localStorage.getItem('lastUser') || ''; } catch (e) {}
-// Función que pide al servidor "validame este usuario y contraseña".
-// Devuelve una "promesa": algo que en el futuro nos va a dar la respuesta.
+
+// ============================================================
+// LOGIN
+// ============================================================
+
+// Le pide al servidor que valide usuario y contraseña. Devuelve una "promesa".
 function login(creds) {
     return new Promise((resolve) => {
-        // Le mandamos al servidor el evento "auth" con los datos,
-        // y le decimos "cuando respondas, llamá a resolve con la respuesta".
         socket.emit('auth', creds, resolve);
     });
 }
-// Esto se ejecuta cuando el jugador aprieta el botón "Entrar" (o Enter).
+
+// Se ejecuta al apretar "Entrar" (o Enter).
 form.addEventListener('submit', async (e) => {
-    e.preventDefault(); // evitamos que la página se recargue (comportamiento normal del form).
-    
-    // Limpiamos errores anteriores y bloqueamos el botón mientras esperamos.
+    e.preventDefault(); // evita que la página se recargue.
+
     loginError.textContent = '';
     loginBtn.disabled = true;
     loginBtn.textContent = 'Conectando... (puede tardar si el servidor estaba dormido)';
 
-    // Tomamos lo que escribió el jugador (sacando espacios sobrantes).
     const creds = { name: inputUser.value.trim(), password: inputPass.value };
-    // Esperamos la respuesta del servidor.
-    const res = await login(creds);
-    // Pase lo que pase, reactivamos el botón.
+    const res = await login(creds); // esperamos la respuesta del servidor.
+
     loginBtn.disabled = false;
     loginBtn.textContent = 'Entrar';
-    // Si el servidor dijo "no", mostramos el error y no hacemos nada más.
+
+    // Si el servidor dijo "no", mostramos el error y paramos.
     if (!res.ok) {
         loginError.textContent = res.error;
         return;
     }
-    // Si llegamos acá, el login fue exitoso:
-    credentials = creds; // guardamos para reconexiones.
-    myName = res.name; // guardamos el nombre confirmado.
-    try { localStorage.setItem('lastUser', res.name); } catch (e) {} // recordamos el usuario
-    loginBox.hidden = true; // ocultamos la caja de login.
-    gameBox.hidden = false; // mostramos la caja del juego.
+
+    // Login exitoso:
+    credentials = creds;
+    myName = res.name;
+    try { localStorage.setItem('lastUser', res.name); } catch (e) {}
+
+    // Completamos el recuadro del personaje con su nombre.
+    nameValue.textContent = myName;
+    avatar.textContent = myName.charAt(0).toUpperCase(); // inicial como icono provisorio.
+
+    loginBox.hidden = true; // ocultamos el login.
+    gameBox.hidden = false; // mostramos el juego.
 });
-// Si se corta la conexión y el navegador logra reconectar solo,
-// volvemos a loguearnos automáticamente con las credenciales que teníamos.
+
+// Si se corta la conexión y el navegador reconecta solo, volvemos a loguearnos.
 socket.on('connect', async () => {
     if (credentials) await login(credentials);
 });
-// El servidor nos manda el ranking actualizado (evento "players").
-// Acá lo dibujamos en la tabla y actualizamos el puntaje en el lienzo.
+
+// ============================================================
+// RANKING
+// El servidor manda la lista ya ordenada (evento "players").
+// ============================================================
 socket.on('players', (players) => {
-        // Vaciamos la tabla para volver a llenarla desde cero.
-    tbody.innerHTML = '';
-    // Recorremos la lista de jugadores (ya viene ordenada del servidor).
+    tbody.innerHTML = ''; // vaciamos la tabla para llenarla de nuevo.
+
     players.forEach((p, i) => {
-        const tr = document.createElement('tr'); // creamos una fila.
-        
-        // Primera columna: el número de posición (1, 2, 3...).
+        const tr = document.createElement('tr'); // una fila por jugador.
+
+        // Columna 1: posición.
         const tdRank = document.createElement('td');
         tdRank.textContent = i + 1;
 
-        // Segunda columna: el nombre (con un puntito verde si está conectado).
+        // Columna 2: nombre (con puntito verde si está conectado).
         const tdName = document.createElement('td');
         if (p.online) {
             const dot = document.createElement('span');
@@ -101,99 +105,69 @@ socket.on('players', (players) => {
         }
         tdName.appendChild(document.createTextNode(p.name));
 
-        // Tercera columna: el puntaje.
+        // Columna 3: puntaje.
         const tdScore = document.createElement('td');
         tdScore.textContent = p.score;
 
-        // Armamos la fila y la agregamos a la tabla.
         tr.append(tdRank, tdName, tdScore);
-        // Si esta fila es del jugador actual, la resaltamos.
+        // Resaltamos la fila del jugador actual.
         if (myName && p.name === myName) tr.classList.add('me');
         tbody.appendChild(tr);
     });
 
-    // Ahora actualizamos el puntaje grande del lienzo.
-    // Buscamos al jugador actual dentro de la lista.
+    // Actualizamos "Tiempo jugado" en el recuadro del personaje.
     const mine = players.find((p) => p.name === myName);
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // borramos lo dibujado antes.
-    ctx.fillStyle = 'black'; // color negro.
-    ctx.font = '32px Arial'; // tamaño y fuente.
-    ctx.fillText('Tu puntaje: ' + (mine ? mine.score : 0), 16, 40); // escribimos el texto.
+    if (mine) scoreValue.textContent = mine.score;
 });
+
 // ============================================================
-// CHAT
+// NAVEGACIÓN ENTRE SECCIONES (Misiones / Inventario / Guerra / Clan)
 // ============================================================
+const navButtons = document.querySelectorAll('.nav-btn'); // los 4 botones del menú.
+const tabs = document.querySelectorAll('.tab');           // las 4 secciones del centro.
 
-// Buscamos en el HTML los elementos del chat.
-const chatLog = document.getElementById('chatLog'); // caja donde aparecen los mensajes.
-const chatForm = document.getElementById('chatForm');  // formulario para escribir.
-const chatInput = document.getElementById('chatInput'); // campo de texto.
-
-// Función que agrega un mensaje a la caja del chat.
-function addMessage(m) {    
-    // Verificamos si el usuario estaba mirando el final del chat.
-    // Si sí (o si el mensaje es suyo), después hacemos scroll automático.
-    const nearBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-    // Creamos un div para el mensaje.
-    const div = document.createElement('div');
-    // Le ponemos una clase extra si el mensaje es del jugador actual.
-    div.className = 'msg' + (m.name === myName ? ' mine' : '');
-
-    // Mostramos la hora del mensaje en formato "HH:MM".
-    const time = document.createElement('span');
-    time.className = 'time';
-    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    // Mostramos el nombre del que envió el mensaje.
-    const name = document.createElement('strong');
-    name.textContent = m.name + ': ';
-
-    // Mostramos el texto del mensaje.
-    // IMPORTANTE: usamos "textContent" (no "innerHTML") para que si alguien
-    // escribe código HTML, se muestre como texto y no se ejecute.
-    // Así evitamos ataques de tipo XSS.
-    const text = document.createElement('span');
-    text.textContent = m.text; // textContent evita que alguien inyecte código HTML
-    
-    // Armamos el mensaje completo: hora + nombre + texto.
-    div.append(time, name, text);
-    chatLog.appendChild(div);
-
-    // Si hay más de 100 mensajes en pantalla, borramos el más viejo.
-    // Así no se llena la página y no se pone lenta.
-    while (chatLog.children.length > 100) chatLog.removeChild(chatLog.firstChild);
-    // Si el usuario estaba abajo del todo, o el mensaje es suyo,
-    // bajamos el scroll para que lo vea.
-    if (nearBottom || m.name === myName) chatLog.scrollTop = chatLog.scrollHeight;
+// Muestra la sección "name" y oculta las demás.
+function showTab(name) {
+    // Solo la sección cuyo id es "tab-<name>" queda con la clase "active".
+    tabs.forEach((t) => t.classList.toggle('active', t.id === 'tab-' + name));
+    // Marcamos como activo el botón correspondiente.
+    navButtons.forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
 }
 
-// El servidor nos manda el historial del chat (últimos 50 mensajes)
-// cuando entramos o cuando nos reconectamos.
-socket.on('chatHistory', (list) => {
-    chatLog.innerHTML = ''; // vaciamos la caja del chat.
-    list.forEach(addMessage); // agregamos cada mensaje del historial.
-    chatLog.scrollTop = chatLog.scrollHeight; // bajamos al final.
+// Cada botón abre la sección indicada en su atributo data-tab.
+navButtons.forEach((b) => {
+    b.addEventListener('click', () => showTab(b.dataset.tab));
 });
 
-// Cuando llega un mensaje nuevo en vivo, lo agregamos al chat.
-socket.on('chat', addMessage);
+// ============================================================
+// INVENTARIO
+// Por ahora solo dibuja casillas vacías. Más adelante el servidor
+// mandará la lista de objetos y se la pasamos a renderInventory().
+// Formato esperado de cada objeto: { icon: '🔫', name: 'Pistola' }
+// ============================================================
+const bagGrid = document.getElementById('bagGrid');
+const BAG_SLOTS = 20; // cantidad de casillas de la mochila.
 
-// Cuando el jugador aprieta Enter o el botón de enviar:
-chatForm.addEventListener('submit', (e) => {
-    e.preventDefault(); // evitamos que la página se recargue.
-    const text = chatInput.value.trim();  // tomamos el texto sin espacios.
-    if (!text) return; // si está vacío, no hacemos nada.
-    socket.emit('chat', text); // mandamos el mensaje al servidor.
-    chatInput.value = '';  // limpiamos el campo.
-    chatInput.focus(); // dejamos el cursor listo para el próximo mensaje.
-});
+function renderInventory(items = []) {
+    bagGrid.innerHTML = ''; // vaciamos la mochila.
+    for (let i = 0; i < BAG_SLOTS; i++) {
+        const slot = document.createElement('div');
+        slot.className = 'slot';
+        const item = items[i]; // objeto de esta casilla (undefined si está vacía).
+        if (item) {
+            slot.textContent = item.icon; // textContent: seguro contra código HTML.
+            slot.title = item.name;       // al pasar el mouse muestra el nombre.
+            slot.classList.add('filled');
+        }
+        bagGrid.appendChild(slot);
+    }
+}
+renderInventory(); // la dibujamos vacía al cargar la página.
 
 // ============================================================
 // ENERGÍA, DINERO Y MISIONES (parte visual)
-// Este código NO calcula nada: solo muestra lo que manda el servidor.
+// Este código NO calcula nada: muestra lo que manda el servidor.
 // ============================================================
-
-// Buscamos en el HTML los elementos del panel.
 const moneyValue = document.getElementById('moneyValue');
 const energyValue = document.getElementById('energyValue');
 const energyMax = document.getElementById('energyMax');
@@ -208,15 +182,14 @@ const missionMsg = document.getElementById('missionMsg');
 let missionsData = []; // lista de misiones que manda el servidor.
 let lastState = null;  // último estado recibido (dinero, energía, misión).
 
-// Crea un botón por cada misión de la lista.
+// Crea un botón por cada misión.
 function renderMissionButtons() {
-    missionList.innerHTML = ''; // vaciamos por si se vuelve a llamar (reconexión).
+    missionList.innerHTML = ''; // vaciamos por si se llama de nuevo (reconexión).
     missionsData.forEach((m) => {
         const btn = document.createElement('button');
         btn.className = 'mission-btn';
         btn.dataset.id = m.id; // guardamos el ID para encontrar el botón después.
 
-        // Título y detalle (usamos textContent: es más seguro que innerHTML).
         const title = document.createElement('strong');
         title.textContent = m.name;
         const info = document.createElement('span');
@@ -224,7 +197,6 @@ function renderMissionButtons() {
         btn.append(title, info);
 
         // Al hacer clic, le pedimos al servidor empezar esa misión.
-        // El servidor responde { ok, error } y mostramos el error si lo hay.
         btn.addEventListener('click', () => {
             missionMsg.textContent = '';
             socket.emit('startMission', m.id, (res) => {
@@ -237,9 +209,8 @@ function renderMissionButtons() {
     updateMissionButtons();
 }
 
-// Desactiva los botones de misiones que no se pueden hacer ahora
-// (hay una misión en curso, o no alcanza la energía).
-// OJO: es solo visual. El servidor vuelve a validar todo igual.
+// Desactiva los botones que no se pueden usar ahora (misión en curso o poca energía).
+// Es solo visual: el servidor vuelve a validar todo.
 function updateMissionButtons() {
     if (!lastState) return;
     missionList.querySelectorAll('.mission-btn').forEach((btn) => {
@@ -248,17 +219,14 @@ function updateMissionButtons() {
     });
 }
 
-// Dibuja en pantalla el estado que mandó el servidor.
+// Dibuja el estado que mandó el servidor.
 function renderState(s) {
     lastState = s;
 
-    // Dinero y energía en texto.
     moneyValue.textContent = s.money;
     energyValue.textContent = s.energy;
     energyMax.textContent = s.maxEnergy;
-
-    // Barra de energía: ancho = porcentaje.
-    energyBar.style.width = (s.energy / s.maxEnergy * 100) + '%';
+    energyBar.style.width = (s.energy / s.maxEnergy * 100) + '%'; // ancho = porcentaje.
 
     // Cuánto falta para el próximo punto de energía.
     energyTimer.textContent = s.nextEnergyMs > 0
@@ -279,16 +247,74 @@ function renderState(s) {
     updateMissionButtons();
 }
 
-// El servidor nos manda la lista de misiones (al iniciar sesión).
+// Lista de misiones (llega al iniciar sesión).
 socket.on('missions', (list) => {
     missionsData = list;
     renderMissionButtons();
 });
 
-// El servidor nos manda nuestro estado (cada segundo y cuando algo cambia).
+// Estado personal (llega cada segundo y cuando algo cambia).
 socket.on('state', renderState);
 
-// El servidor avisa que terminó una misión y pagó la recompensa.
+// Aviso de misión terminada y recompensa pagada.
 socket.on('missionDone', ({ name, reward }) => {
     missionMsg.textContent = `✅ Misión completada: ${name}. Ganaste 💵 ${reward}.`;
+});
+
+// ============================================================
+// CHAT
+// ============================================================
+const chatLog = document.getElementById('chatLog');     // caja de mensajes.
+const chatForm = document.getElementById('chatForm');   // formulario para escribir.
+const chatInput = document.getElementById('chatInput'); // campo de texto.
+
+// Agrega un mensaje a la caja del chat.
+function addMessage(m) {
+    // ¿Estaba el usuario mirando el final del chat? Si sí, bajamos solos después.
+    const nearBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+
+    const div = document.createElement('div');
+    div.className = 'msg' + (m.name === myName ? ' mine' : '');
+
+    // Hora en formato HH:MM.
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // Nombre de quien escribió.
+    const name = document.createElement('strong');
+    name.textContent = m.name + ': ';
+
+    // Texto. Usamos textContent (no innerHTML) para que el código HTML
+    // escrito por alguien se muestre como texto y no se ejecute (evita XSS).
+    const text = document.createElement('span');
+    text.textContent = m.text;
+
+    div.append(time, name, text);
+    chatLog.appendChild(div);
+
+    // Máximo 100 mensajes en pantalla.
+    while (chatLog.children.length > 100) chatLog.removeChild(chatLog.firstChild);
+
+    if (nearBottom || m.name === myName) chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+// Historial (últimos 50 mensajes) al entrar o reconectar.
+socket.on('chatHistory', (list) => {
+    chatLog.innerHTML = '';
+    list.forEach(addMessage);
+    chatLog.scrollTop = chatLog.scrollHeight;
+});
+
+// Mensaje nuevo en vivo.
+socket.on('chat', addMessage);
+
+// Enviar mensaje (Enter o botón).
+chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    socket.emit('chat', text);
+    chatInput.value = '';
+    chatInput.focus();
 });
