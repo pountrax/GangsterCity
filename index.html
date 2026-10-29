@@ -2,74 +2,173 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <!-- Esta línea hace que el celular use su ancho real (necesaria para el diseño responsive) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Game</title>
+    <title>GangsterCity</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Librería de Socket.IO: la conexión en tiempo real con el servidor -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
-    <!-- Ranking global: siempre visible -->
-    <h2>🏆 Ranking global</h2>
-    <div id="scoreWrap">
-        <table id="scoreboard">
-            <thead>
-                <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-    </div>
+    <!-- #app: contenedor general. Limita el ancho máximo y lo centra en la pantalla -->
+    <div id="app">
 
-    <!-- Pantalla de ingreso -->
-    <div id="login">
-        <form id="loginForm">
-            <h2>Entrar al juego</h2>
-            <p class="hint">Si el usuario no existe, se crea automáticamente.</p>
-            <input id="username" type="text" placeholder="Usuario" maxlength="20" autocomplete="username" required>
-            <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password" required>
-            <button type="submit" id="loginBtn">Entrar</button>
-            <p id="loginError"></p>
-        </form>
-    </div>
-
-    <!-- Juego -->
-    <div id="game" hidden>
-        <!-- Panel con dinero y energía -->
-<div id="hud">
-    <div class="stat">
-        <div class="stat-label">💵 Dinero: <span id="moneyValue">0</span></div>
-    </div>
-    <div class="stat">
-        <div class="stat-label">
-            ⚡ Energía: <span id="energyValue">0</span>/<span id="energyMax">100</span>
-            <small id="energyTimer"></small>
-        </div>
-        <!-- Barra: su ancho se cambia desde script.js -->
-        <div class="bar"><div id="energyBar" class="bar-fill"></div></div>
-    </div>
-</div>
-
-<!-- Panel de misiones -->
-<div id="missions">
-    <h2>Misiones</h2>
-    <!-- Se muestra solo mientras hay una misión en curso -->
-    <div id="missionActive" hidden>
-        <p id="missionActiveText"></p>
-        <div class="bar"><div id="missionBar" class="bar-fill mission-fill"></div></div>
-    </div>
-    <!-- Los botones de misiones los crea script.js con la lista del servidor -->
-    <div id="missionList"></div>
-    <p id="missionMsg"></p>
-</div>
-        <canvas id="gameCanvas"></canvas>
-
-        <div id="chat">
-            <h2>Chat global</h2>
-            <div id="chatLog"></div>
-            <form id="chatForm">
-                <input id="chatInput" type="text" placeholder="Escribí un mensaje..." maxlength="200" autocomplete="off">
-                <button type="submit">Enviar</button>
+        <!-- ================== PANTALLA DE INGRESO ================== -->
+        <div id="login">
+            <form id="loginForm">
+                <h2>Entrar al juego</h2>
+                <p class="hint">Si el usuario no existe, se crea automáticamente.</p>
+                <input id="username" type="text" placeholder="Usuario" maxlength="20" autocomplete="username" required>
+                <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+                <button type="submit" id="loginBtn">Entrar</button>
+                <p id="loginError"></p>
             </form>
         </div>
+
+        <!-- ================== JUEGO (se muestra al iniciar sesión) ================== -->
+        <div id="game" hidden>
+
+            <!-- #layout: dos columnas (izquierda: personaje y menú / derecha: contenido) -->
+            <div id="layout">
+
+                <!-- ----- COLUMNA IZQUIERDA ----- -->
+                <aside id="sidebar">
+
+                    <!-- Recuadro del personaje -->
+                    <div class="panel" id="profile">
+                        <div class="profile-head">
+                            <!-- Icono del personaje. Más adelante irá la imagen armada por capas -->
+                            <div id="avatar">?</div>
+                            <div>
+                                <div id="nameValue" class="profile-name">---</div>
+                                <!-- El nivel todavía no viene del servidor: por ahora es fijo en 1 -->
+                                <div class="profile-level">Nivel <span id="levelValue">1</span></div>
+                            </div>
+                        </div>
+
+                        <!-- Dinero -->
+                        <div class="stat">
+                            <div class="stat-label">💵 Dinero: <span id="moneyValue">0</span></div>
+                        </div>
+
+                        <!-- Energía con su barra -->
+                        <div class="stat">
+                            <div class="stat-label">
+                                ⚡ Energía: <span id="energyValue">0</span>/<span id="energyMax">100</span>
+                                <small id="energyTimer"></small>
+                            </div>
+                            <div class="bar"><div id="energyBar" class="bar-fill"></div></div>
+                        </div>
+
+                        <!-- Puntaje de tiempo jugado (antes se dibujaba en el canvas) -->
+                        <div class="stat">
+                            <div class="stat-label">⏱ Tiempo jugado: <span id="scoreValue">0</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Menú de navegación. data-tab indica qué sección abre cada botón -->
+                    <nav class="panel" id="nav">
+                        <button class="nav-btn active" data-tab="misiones"><span class="nav-icon">🎯</span> Misiones</button>
+                        <button class="nav-btn" data-tab="inventario"><span class="nav-icon">🎒</span> Inventario</button>
+                        <button class="nav-btn" data-tab="guerra"><span class="nav-icon">⚔️</span> Guerra</button>
+                        <button class="nav-btn" data-tab="clan"><span class="nav-icon">🏴</span> Clan</button>
+                    </nav>
+                </aside>
+
+                <!-- ----- CENTRO: contenido de la sección elegida ----- -->
+                <main id="content" class="panel">
+
+                    <!-- ===== MISIONES ===== -->
+                    <section id="tab-misiones" class="tab active">
+                        <h2>Misiones</h2>
+                        <!-- Espacio reservado para la imagen de misiones -->
+                        <div class="placeholder">🖼️ Acá irá la imagen de misiones</div>
+
+                        <!-- Misión en curso (se muestra solo mientras hay una) -->
+                        <div id="missionActive" hidden>
+                            <p id="missionActiveText"></p>
+                            <div class="bar"><div id="missionBar" class="bar-fill mission-fill"></div></div>
+                        </div>
+                        <!-- Los botones los crea script.js con la lista del servidor -->
+                        <div id="missionList"></div>
+                        <p id="missionMsg"></p>
+                    </section>
+
+                    <!-- ===== INVENTARIO ===== -->
+                    <section id="tab-inventario" class="tab">
+                        <h2>Inventario</h2>
+                        <div id="inventoryLayout">
+                            <!-- Ranuras de equipo (lo que lleva puesto el personaje) -->
+                            <div id="equipment">
+                                <h3>Equipado</h3>
+                                <div class="equip-slot"><div class="slot"></div><span>Cabeza</span></div>
+                                <div class="equip-slot"><div class="slot"></div><span>Torso</span></div>
+                                <div class="equip-slot"><div class="slot"></div><span>Piernas</span></div>
+                                <div class="equip-slot"><div class="slot"></div><span>Arma</span></div>
+                            </div>
+                            <!-- Mochila: las casillas las crea script.js -->
+                            <div>
+                                <h3>Mochila</h3>
+                                <div id="bagGrid"></div>
+                                <p class="muted">Todavía no tenés objetos.</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- ===== GUERRA ===== -->
+                    <section id="tab-guerra" class="tab">
+                        <h2>Guerra</h2>
+                        <div class="placeholder">🖼️ Acá irá la imagen de guerra</div>
+                        <p class="muted">Próximamente.</p>
+                    </section>
+
+                    <!-- ===== CLAN ===== -->
+                    <section id="tab-clan" class="tab">
+                        <h2>Clan</h2>
+                        <div class="clan-card">
+                            <div class="clan-emblem">🏴</div>
+                            <div>
+                                <strong>Sin clan</strong>
+                                <p class="muted">Todavía no pertenecés a ningún clan.</p>
+                            </div>
+                        </div>
+                        <!-- Botones desactivados hasta que exista la función en el servidor -->
+                        <div class="clan-actions">
+                            <button class="action-btn" disabled>Crear clan</button>
+                            <button class="action-btn" disabled>Buscar clan</button>
+                        </div>
+                        <h3>Miembros</h3>
+                        <table class="simple-table">
+                            <thead><tr><th>Usuario</th><th>Rango</th></tr></thead>
+                            <tbody><tr><td colspan="2" class="muted">Sin miembros</td></tr></tbody>
+                        </table>
+                    </section>
+                </main>
+            </div>
+
+            <!-- ================== CHAT GLOBAL ================== -->
+            <div class="panel" id="chat">
+                <h2>Chat global</h2>
+                <div id="chatLog"></div>
+                <form id="chatForm">
+                    <input id="chatInput" type="text" placeholder="Escribí un mensaje..." maxlength="200" autocomplete="off">
+                    <button type="submit">Enviar</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ================== RANKING GLOBAL (visible siempre, también antes de entrar) ================== -->
+        <section class="panel" id="ranking">
+            <h2>🏆 Ranking global</h2>
+            <div id="scoreWrap">
+                <table id="scoreboard">
+                    <thead>
+                        <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </section>
     </div>
 
     <script src="script.js"></script>
