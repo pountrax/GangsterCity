@@ -1,4 +1,449 @@
 /* ============================================================
+   style.css — Estilo del juego (tema oscuro)
+   Los colores están guardados en variables para cambiarlos fácil.
+   ============================================================ */
+
+:root {
+    --bg: #14161b;        /* fondo de la página */
+    --panel: #1f232b;     /* fondo de los recuadros */
+    --panel2: #2a303b;    /* fondo de elementos dentro de recuadros */
+    --border: #3a4150;    /* bordes */
+    --text: #e8eaed;      /* texto principal */
+    --muted: #9aa3b2;     /* texto secundario */
+    --accent: #f59e0b;    /* color de acento (naranja) */
+    --green: #22c55e;
+    --blue: #2563eb;
+    --red: #f87171;
+    --violet: #a78bfa;    /* color de la experiencia */
+}
+
+/* box-sizing: el padding y el borde NO agrandan los elementos (evita desbordes) */
+* { box-sizing: border-box; }
+
+/* Todo elemento con el atributo "hidden" se oculta, pase lo que pase */
+[hidden] { display: none !important; }
+
+body {
+    margin: 0;
+    padding: 16px;                 /* margen general alrededor del juego */
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, sans-serif;
+}
+
+h2 { margin: 0 0 12px; font-size: 20px; }
+h3 { margin: 16px 0 8px; font-size: 16px; }
+.muted { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+
+/* Contenedor general: ancho máximo y centrado */
+#app { max-width: 1100px; margin: 0 auto; }
+
+/* Recuadro genérico: lo usan todas las secciones */
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;           /* separación entre recuadros */
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+#login { display: flex; justify-content: center; margin-bottom: 16px; }
+#loginForm {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 24px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 340px;
+}
+#loginForm h2 { text-align: center; margin: 0; }
+#loginForm .hint { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+#loginForm input {
+    padding: 12px;
+    font-size: 16px;               /* 16px evita el zoom automático en iPhone */
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel2);
+    color: var(--text);
+    width: 100%;
+}
+#loginForm button {
+    padding: 12px;
+    font-size: 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--blue);
+    color: white;
+    cursor: pointer;
+}
+#loginForm button:disabled { opacity: 0.6; cursor: wait; }
+#loginError { margin: 0; color: var(--red); font-size: 14px; text-align: center; min-height: 18px; }
+
+/* ============================================================
+   DISEÑO PRINCIPAL: columna izquierda + centro
+   ============================================================ */
+#layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;   /* izquierda fija, centro flexible */
+    gap: 16px;
+    align-items: start;
+}
+/* Los recuadros dentro del layout no llevan margen abajo: el "gap" ya separa */
+#layout .panel { margin-bottom: 0; }
+#sidebar { display: flex; flex-direction: column; gap: 16px; }
+#content { min-height: 460px; }
+
+/* ============================================================
+   RECUADRO DEL PERSONAJE
+   ============================================================ */
+.profile-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#avatar {
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;                /* que no se achique */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+}
+.profile-name { font-size: 18px; font-weight: bold; word-break: break-word; }
+.profile-class { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.profile-level { color: var(--accent); font-size: 14px; margin-top: 2px; }
+
+.stat { margin-bottom: 10px; }
+.stat-label { font-weight: bold; margin-bottom: 4px; font-size: 15px; }
+.stat-label small { font-weight: normal; color: var(--muted); margin-left: 6px; }
+
+/* Barras de progreso: .bar es el fondo, .bar-fill es la parte llena */
+.bar { width: 100%; height: 14px; background: var(--panel2); border-radius: 8px; overflow: hidden; }
+.bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);          /* naranja = energía */
+    transition: width 0.4s linear;      /* movimiento suave */
+}
+.mission-fill { background: var(--green); }   /* verde = misión */
+.xp-fill { background: var(--violet); }       /* violeta = experiencia */
+
+/* Panel que se abre al tocar "Editar perfil" */
+#editProfile {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#editProfile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+#editProfile input {
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#editProfile input:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ============================================================
+   NAVEGACIÓN
+   ============================================================ */
+#nav { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.nav-btn {
+    position: relative;            /* para ubicar el globito rojo */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    font-size: 16px;
+    text-align: left;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.nav-btn:hover { border-color: var(--accent); }
+.nav-btn.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
+.nav-icon { font-size: 20px; }
+
+/* Globito rojo con la cantidad de puntos sin gastar */
+.badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    line-height: 20px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background: #ef4444;
+    border-radius: 10px;
+}
+
+/* ============================================================
+   BOTONES GENERALES
+   ============================================================ */
+.action-btn {
+    padding: 10px 16px;
+    font-size: 15px;
+    color: white;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.action-btn:disabled { background: var(--panel2); color: var(--muted); cursor: not-allowed; }
+.action-btn.full { width: 100%; margin-top: 4px; }
+.action-btn.small { padding: 6px 12px; font-size: 14px; }
+.action-btn.danger { background: #b91c1c; }
+
+/* ============================================================
+   SECCIONES DEL CENTRO
+   Solo la que tiene la clase "active" se ve.
+   ============================================================ */
+.tab { display: none; }
+.tab.active { display: block; }
+
+/* Espacio vacío reservado para imágenes futuras */
+.placeholder {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 12px;
+    margin-bottom: 16px;
+    color: var(--muted);
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+}
+
+/* ---------- Misiones ---------- */
+#missionActive { margin-bottom: 12px; }
+#missionActive p { margin: 0 0 6px; font-size: 14px; }
+#missionList { display: flex; flex-direction: column; gap: 8px; }
+.mission-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.mission-btn:hover:not(:disabled) { border-color: var(--accent); }
+.mission-btn span { font-size: 13px; color: var(--muted); }
+.mission-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+#missionMsg { min-height: 18px; margin: 10px 0 0; font-size: 14px; }
+
+/* ---------- Estadísticas (dentro de Inventario) ---------- */
+.stats-box {
+    margin-bottom: 16px;
+    padding: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.stats-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.stats-head h3 { margin: 0; }
+.points-badge { font-size: 14px; color: var(--muted); }
+.points-badge strong { color: var(--accent); font-size: 18px; }
+/* Cada fila: nombre | valor | botón + */
+.stat-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-name { font-size: 15px; }
+.stat-value { font-weight: bold; min-width: 32px; text-align: right; }
+.plus-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    border-radius: 8px;
+    background: var(--green);
+    color: #0b1a10;
+    cursor: pointer;
+}
+.plus-btn:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; opacity: 0.5; }
+
+/* ---------- Inventario ---------- */
+#inventoryLayout { display: grid; grid-template-columns: 150px 1fr; gap: 16px; }
+#inventoryLayout h3 { margin-top: 0; }
+.equip-slot { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; color: var(--muted); }
+
+/* Casilla de objeto (vacía por defecto) */
+.slot {
+    width: 100%;
+    max-width: 64px;
+    aspect-ratio: 1;               /* siempre cuadrada */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    background: var(--panel2);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+.slot.filled { border-style: solid; border-color: var(--accent); }
+
+/* Mochila: casillas que se acomodan solas según el ancho disponible */
+#bagGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 8px; }
+#bagGrid .slot { max-width: none; }
+
+/* ---------- Clan ---------- */
+.clan-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.clan-card p { margin: 4px 0 0; }
+.clan-emblem { font-size: 40px; }
+.clan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+#clanMsg { min-height: 18px; }
+
+/* Formulario de una línea (campo + botón) */
+.inline-form { display: flex; gap: 8px; }
+.inline-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.simple-table { width: 100%; border-collapse: collapse; }
+.simple-table th, .simple-table td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+.simple-table th { background: var(--panel2); }
+
+/* ============================================================
+   CHAT
+   ============================================================ */
+#chat h2 { font-size: 18px; margin-bottom: 8px; }
+#chatLog {
+    height: 220px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 15px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#chatLog .msg { margin-bottom: 4px; overflow-wrap: anywhere; }
+#chatLog .time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+#chatLog .mine strong { color: var(--accent); }
+#chatForm { display: flex; gap: 8px; margin-top: 8px; }
+#chatInput {
+    flex: 1;
+    min-width: 0;                  /* deja que el campo se achique en pantallas chicas */
+    padding: 12px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#chatForm button {
+    padding: 12px 16px;
+    font-size: 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--blue);
+    color: white;
+    cursor: pointer;
+}
+
+/* ============================================================
+   RANKINGS (con pestañas)
+   ============================================================ */
+#rankTabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.rank-tab {
+    padding: 8px 14px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.rank-tab:hover { border-color: var(--accent); }
+.rank-tab.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
+
+/* Solo el panel con la clase "active" se ve */
+.rank-pane { display: none; }
+.rank-pane.active { display: block; }
+
+.score-wrap { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.board { width: 100%; border-collapse: collapse; }
+.board th, .board td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: center; word-break: break-word; }
+.board th { background: var(--panel2); position: sticky; top: 0; }
+.board .me { background: rgba(245, 158, 11, 0.2); font-weight: bold; }
+.board .empty { color: var(--muted); }
+/* Puntito verde de "conectado" */
+.dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: var(--green); }
+
+/* ============================================================
+   CELULARES Y PANTALLAS CHICAS
+   ============================================================ */
+@media (max-width: 800px) {
+    /* Una sola columna: personaje arriba, contenido abajo */
+    #layout { grid-template-columns: 1fr; }
+
+    /* Navegación en fila: 4 botones lado a lado, con el icono arriba del texto */
+    #nav { flex-direction: row; gap: 6px; padding: 8px; }
+    .nav-btn {
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 4px;
+        font-size: 12px;
+        text-align: center;
+    }
+    /* El globito rojo pasa a la esquina del botón */
+    .badge { position: absolute; top: 2px; right: 4px; margin-left: 0; }
+    #content { min-height: 0; }
+}
+
+@media (max-width: 500px) {
+    body { padding: 8px; }
+    .panel { padding: 12px; }
+    #inventoryLayout { grid-template-columns: 1fr; }   /* equipo arriba, mochila abajo */
+    #chatLog { height: 180px; font-size: 14px; }
+    .board th, .board td { padding: 6px; font-size: 14px; }
+    .rank-tab { flex: 1; padding: 8px 6px; font-size: 14px; }
+}
+/* ============================================================
    CLAN: subpestañas, lista de miembros con rangos y chat de clan
    ============================================================ */
 
