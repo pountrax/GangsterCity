@@ -33,6 +33,33 @@
 
     <!-- Juego -->
     <div id="game" hidden>
+        <!-- Panel con dinero y energía -->
+<div id="hud">
+    <div class="stat">
+        <div class="stat-label">💵 Dinero: <span id="moneyValue">0</span></div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">
+            ⚡ Energía: <span id="energyValue">0</span>/<span id="energyMax">100</span>
+            <small id="energyTimer"></small>
+        </div>
+        <!-- Barra: su ancho se cambia desde script.js -->
+        <div class="bar"><div id="energyBar" class="bar-fill"></div></div>
+    </div>
+</div>
+
+<!-- Panel de misiones -->
+<div id="missions">
+    <h2>Misiones</h2>
+    <!-- Se muestra solo mientras hay una misión en curso -->
+    <div id="missionActive" hidden>
+        <p id="missionActiveText"></p>
+        <div class="bar"><div id="missionBar" class="bar-fill mission-fill"></div></div>
+    </div>
+    <!-- Los botones de misiones los crea script.js con la lista del servidor -->
+    <div id="missionList"></div>
+    <p id="missionMsg"></p>
+</div>
         <canvas id="gameCanvas"></canvas>
 
         <div id="chat">
