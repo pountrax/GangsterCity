@@ -158,3 +158,53 @@ canvas {
     max-height: 220px;
 }
 #login { margin-top: 4px; }
+
+/* ===== Panel de dinero y energía, y panel de misiones ===== */
+#hud, #missions {
+    width: 100%;
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.stat { margin-bottom: 8px; }
+.stat-label { font-weight: bold; margin-bottom: 4px; }
+.stat-label small { font-weight: normal; color: #666; margin-left: 6px; }
+
+/* Barra de progreso: .bar es el fondo, .bar-fill es la parte llena */
+.bar {
+    width: 100%;
+    height: 16px;
+    background: #e5e7eb;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #f59e0b;              /* naranja = energía */
+    transition: width 0.4s linear;    /* movimiento suave */
+}
+.mission-fill { background: #22c55e; } /* verde = progreso de misión */
+
+/* Botones de misiones */
+#missionList { display: flex; flex-direction: column; gap: 8px; }
+.mission-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 15px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    background: #fafafa;
+    cursor: pointer;
+}
+.mission-btn span { font-size: 13px; color: #555; }
+.mission-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* El atributo "hidden" a veces pierde contra display: lo forzamos */
+#missionActive[hidden] { display: none; }
+#missionMsg { min-height: 18px; margin: 8px 0 0; font-size: 14px; }
