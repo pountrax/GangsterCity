@@ -1,7 +1,8 @@
 // ============================================================
 // script.js — Lo que corre en el NAVEGADOR del jugador
 // Muestra el login, el panel del personaje, el menú, las misiones,
-// el inventario con estadísticas, los clanes, los rankings y el chat.
+// el inventario con estadísticas, los clanes (miembros y chat), los
+// rankings y el chat global.
 // NO calcula nada del juego: solo pide cosas al servidor (server.js)
 // y muestra lo que el servidor devuelve.
 // ============================================================
@@ -45,6 +46,8 @@ let myName = null;
 let lastState = null;
 // Configuración del juego que manda el servidor (niveles de clan, lista de estadísticas).
 let clanConfig = null;
+// Cuánto dura un mensaje del chat global (el servidor lo confirma al entrar).
+let chatTtlMs = 30 * 60 * 1000;
 
 // Recordamos el último usuario usado (la contraseña NO se recuerda).
 try { inputUser.value = localStorage.getItem('lastUser') || ''; } catch (e) {}
@@ -96,6 +99,29 @@ form.addEventListener('submit', async (e) => {
 socket.on('connect', async () => {
     if (credentials) await login(credentials);
 });
+
+// ============================================================
+// BOTÓN DE DOS TOQUES (para acciones peligrosas: salir, expulsar)
+// El primer toque pide confirmación; el segundo ejecuta la acción.
+// Si no se confirma en 4 segundos, vuelve al texto original.
+// ============================================================
+function confirmButton(btn, label, confirmLabel, onConfirm) {
+    let armed = false;
+    let timer = null;
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+        if (!armed) {
+            armed = true;
+            btn.textContent = confirmLabel;
+            timer = setTimeout(() => { armed = false; btn.textContent = label; }, 4000);
+            return;
+        }
+        clearTimeout(timer);
+        armed = false;
+        btn.textContent = label;
+        onConfirm();
+    });
+}
 
 // ============================================================
 // EDITAR PERFIL (por ahora solo abre y cierra el panel)
@@ -292,7 +318,7 @@ function buildStatsPanel(list) {
 // ============================================================
 // MISIONES
 // ============================================================
-const energyMissionList = document.getElementById('missionList');
+const missionListEl = document.getElementById('missionList');
 const missionActive = document.getElementById('missionActive');
 const missionActiveText = document.getElementById('missionActiveText');
 const missionBar = document.getElementById('missionBar');
@@ -302,7 +328,7 @@ let missionsData = []; // lista de misiones que manda el servidor.
 
 // Crea un botón por cada misión.
 function renderMissionButtons() {
-    energyMissionList.innerHTML = '';
+    missionListEl.innerHTML = '';
     missionsData.forEach((m) => {
         const btn = document.createElement('button');
         btn.className = 'mission-btn';
@@ -322,7 +348,7 @@ function renderMissionButtons() {
             });
         });
 
-        energyMissionList.appendChild(btn);
+        missionListEl.appendChild(btn);
     });
     updateMissionButtons();
 }
@@ -331,7 +357,7 @@ function renderMissionButtons() {
 // Es solo visual: el servidor vuelve a validar todo.
 function updateMissionButtons() {
     if (!lastState) return;
-    energyMissionList.querySelectorAll('.mission-btn').forEach((btn) => {
+    missionListEl.querySelectorAll('.mission-btn').forEach((btn) => {
         const m = missionsData.find((x) => x.id === btn.dataset.id);
         btn.disabled = !!lastState.mission || lastState.energy < m.energy;
     });
@@ -354,11 +380,82 @@ socket.on('missionDone', ({ name, reward, xp, levelsGained, level }) => {
 });
 
 // ============================================================
+// CHAT (funciones compartidas por el chat global y el chat de clan)
+// ============================================================
+
+// Agrega un mensaje a una caja de chat (logEl).
+function addChatMessage(logEl, m) {
+    // ¿Estaba el usuario mirando el final del chat? Si sí, bajamos solos después.
+    const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+
+    const div = document.createElement('div');
+    div.className = 'msg' + (m.name === myName ? ' mine' : '');
+    div.dataset.ts = m.ts; // guardamos la hora para poder ocultar mensajes viejos.
+
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const name = document.createElement('strong');
+    name.textContent = m.name + ': ';
+
+    // textContent (no innerHTML) para que el HTML escrito por alguien no se ejecute (evita XSS).
+    const text = document.createElement('span');
+    text.textContent = m.text;
+
+    div.append(time, name, text);
+    logEl.appendChild(div);
+
+    // Máximo 100 mensajes en pantalla.
+    while (logEl.children.length > 100) logEl.removeChild(logEl.firstChild);
+
+    if (nearBottom || m.name === myName) logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ============================================================
+// CHAT GLOBAL
+// ============================================================
+const chatLog = document.getElementById('chatLog');
+const chatForm = document.getElementById('chatForm');
+const chatInput = document.getElementById('chatInput');
+
+// Historial (últimos mensajes de los últimos 30 minutos) al entrar o reconectar.
+socket.on('chatHistory', (list) => {
+    chatLog.innerHTML = '';
+    list.forEach((m) => addChatMessage(chatLog, m));
+    chatLog.scrollTop = chatLog.scrollHeight;
+});
+
+// Mensaje nuevo en vivo.
+socket.on('chat', (m) => addChatMessage(chatLog, m));
+
+// Enviar mensaje (Enter o botón).
+chatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    socket.emit('chat', text);
+    chatInput.value = '';
+    chatInput.focus();
+});
+
+// Cada minuto sacamos de la pantalla los mensajes que ya pasaron los 30 minutos,
+// igual que hace la base de datos. (Usa la hora de tu dispositivo: si tu reloj
+// estuviera muy mal, podrías ver mensajes desaparecer antes o después.)
+setInterval(() => {
+    const limit = Date.now() - chatTtlMs;
+    chatLog.querySelectorAll('.msg').forEach((el) => {
+        if (Number(el.dataset.ts) < limit) el.remove();
+    });
+}, 60000);
+
+// ============================================================
 // CLANES
 // ============================================================
 const myClanBox = document.getElementById('myClanBox');
 const clanNameEl = document.getElementById('clanName');
 const clanInfo = document.getElementById('clanInfo');
+const myRoleValue = document.getElementById('myRoleValue');
 const clanMembers = document.getElementById('clanMembers');
 const leaveClanBtn = document.getElementById('leaveClanBtn');
 const createClanBox = document.getElementById('createClanBox');
@@ -370,6 +467,10 @@ const joinClanBox = document.getElementById('joinClanBox');
 const joinClanReq = document.getElementById('joinClanReq');
 const clanJoinList = document.getElementById('clanJoinList');
 const clanMsg = document.getElementById('clanMsg');
+
+// Icono y nombre de cada rango. El líder lleva el sombrero 🎩 (cambialo por 🧢 si preferís gorra).
+const ROLE_ICONS = { lider: '🎩', oficial: '⭐', miembro: '👤' };
+const ROLE_LABELS = { lider: 'Líder', oficial: 'Oficial', miembro: 'Miembro' };
 
 let myClanInfo = null;    // datos de mi clan (null si no tengo).
 let lastClanName;         // para detectar cuándo cambia mi clan.
@@ -397,6 +498,90 @@ function updateClanButtons() {
     document.querySelectorAll('.join-btn').forEach((b) => { b.disabled = !canJoin; });
 }
 
+// Pide al servidor cambiar el rango de un miembro ('oficial' o 'miembro').
+function setRole(key, role) {
+    clanMsg.textContent = '';
+    socket.emit('setMemberRole', { key, role }, (res) => {
+        if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
+        clanMsg.textContent = role === 'oficial' ? '✅ Miembro ascendido a Oficial.' : '✅ Oficial degradado a Miembro.';
+        loadMyClan();
+    });
+}
+
+// Dibuja la lista de miembros: una fila por miembro, con botones si soy el líder.
+function renderMembers(members, myRole) {
+    clanMembers.innerHTML = '';
+    const iAmLeader = myRole === 'lider';
+
+    members.forEach((m) => {
+        const row = document.createElement('div');
+        row.className = 'member-row';
+
+        // Icono de rango + punto verde (si está conectado) + nombre.
+        const nameBox = document.createElement('span');
+        nameBox.className = 'member-name';
+        const icon = document.createElement('span');
+        icon.className = 'member-icon';
+        icon.textContent = ROLE_ICONS[m.role] || '👤';
+        icon.title = ROLE_LABELS[m.role] || '';
+        nameBox.appendChild(icon);
+        if (m.online) {
+            const dot = document.createElement('span');
+            dot.className = 'dot';
+            dot.title = 'Conectado';
+            nameBox.appendChild(dot);
+        }
+        nameBox.appendChild(document.createTextNode(m.name + (m.name === myName ? ' (vos)' : '')));
+
+        const level = document.createElement('span');
+        level.className = 'member-level';
+        level.textContent = 'Nv ' + m.level;
+
+        const tag = document.createElement('span');
+        tag.className = 'role-tag ' + m.role;
+        tag.textContent = ROLE_LABELS[m.role];
+
+        row.append(nameBox, level, tag);
+
+        // Botones SOLO si soy el líder y esta fila no es la del líder.
+        // (El servidor vuelve a verificarlo: esto es solo para mostrar u ocultar.)
+        if (iAmLeader && m.role !== 'lider') {
+            const actions = document.createElement('div');
+            actions.className = 'member-actions';
+
+            const roleBtn = document.createElement('button');
+            roleBtn.type = 'button';
+            roleBtn.className = 'action-btn small';
+            if (m.role === 'oficial') {
+                roleBtn.classList.add('neutral');
+                roleBtn.textContent = '⬇ Degradar';
+                roleBtn.addEventListener('click', () => setRole(m.key, 'miembro'));
+            } else {
+                roleBtn.textContent = '⬆ Ascender';
+                roleBtn.addEventListener('click', () => setRole(m.key, 'oficial'));
+            }
+
+            // Expulsar pide confirmar con un segundo toque.
+            const kickBtn = document.createElement('button');
+            kickBtn.type = 'button';
+            kickBtn.className = 'action-btn small danger';
+            confirmButton(kickBtn, '✖ Expulsar', '¿Seguro?', () => {
+                clanMsg.textContent = '';
+                socket.emit('kickMember', m.key, (res) => {
+                    if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
+                    clanMsg.textContent = `✅ ${m.name} fue expulsado del clan.`;
+                    loadMyClan();
+                });
+            });
+
+            actions.append(roleBtn, kickBtn);
+            row.appendChild(actions);
+        }
+
+        clanMembers.appendChild(row);
+    });
+}
+
 // Dibuja la pestaña Clan completa.
 function renderClanTab() {
     const inClan = !!myClanInfo;
@@ -408,16 +593,8 @@ function renderClanTab() {
     if (inClan) {
         clanNameEl.textContent = myClanInfo.name;
         clanInfo.textContent = `${myClanInfo.members.length} miembro(s)`;
-        clanMembers.innerHTML = '';
-        myClanInfo.members.forEach((m) => {
-            const tr = document.createElement('tr');
-            [m.name, m.level, m.role].forEach((v) => {
-                const td = document.createElement('td');
-                td.textContent = v;
-                tr.appendChild(td);
-            });
-            clanMembers.appendChild(tr);
-        });
+        myRoleValue.textContent = `${ROLE_ICONS[myClanInfo.myRole]} ${ROLE_LABELS[myClanInfo.myRole]}`;
+        renderMembers(myClanInfo.members, myClanInfo.myRole);
     } else {
         // Lista de clanes para unirse (sale del ranking de clanes).
         clanJoinList.innerHTML = '';
@@ -472,27 +649,62 @@ createClanForm.addEventListener('submit', (e) => {
     });
 });
 
-// Salir del clan: pide confirmar con un segundo toque (sin usar ventanas emergentes).
-let leaveArmed = false;
-let leaveTimer = null;
-function resetLeaveBtn() {
-    clearTimeout(leaveTimer);
-    leaveArmed = false;
-    leaveClanBtn.textContent = 'Salir del clan';
-}
-leaveClanBtn.addEventListener('click', () => {
-    if (!leaveArmed) {
-        leaveArmed = true;
-        leaveClanBtn.textContent = '¿Seguro? Tocá de nuevo';
-        leaveTimer = setTimeout(resetLeaveBtn, 4000); // se cancela solo a los 4 segundos.
-        return;
-    }
-    resetLeaveBtn();
+// Salir del clan (con confirmación de dos toques).
+confirmButton(leaveClanBtn, 'Salir del clan', '¿Seguro? Tocá de nuevo', () => {
     socket.emit('leaveClan', (res) => {
         if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
         clanMsg.textContent = '✅ Saliste del clan.';
         loadMyClan();
     });
+});
+
+// ---------- Subpestañas del clan (Miembros / Chat) ----------
+const subTabs = document.querySelectorAll('.sub-tab');
+const clanPanes = document.querySelectorAll('.clan-pane');
+const clanChatLog = document.getElementById('clanChatLog');
+const clanChatForm = document.getElementById('clanChatForm');
+const clanChatInput = document.getElementById('clanChatInput');
+
+function showClanPane(name) {
+    subTabs.forEach((b) => b.classList.toggle('active', b.dataset.clanpane === name));
+    clanPanes.forEach((p) => p.classList.toggle('active', p.id === 'clanPane-' + name));
+    // Al abrir el chat, bajamos hasta el último mensaje.
+    if (name === 'chat') clanChatLog.scrollTop = clanChatLog.scrollHeight;
+}
+subTabs.forEach((b) => b.addEventListener('click', () => showClanPane(b.dataset.clanpane)));
+
+// ---------- Chat del clan ----------
+
+// Pide el historial del chat de mi clan (vacío si no tengo clan).
+function loadClanChat() {
+    socket.emit('getClanChat', (res) => {
+        clanChatLog.innerHTML = '';
+        if (res && res.ok) {
+            res.messages.forEach((m) => addChatMessage(clanChatLog, m));
+            clanChatLog.scrollTop = clanChatLog.scrollHeight;
+        }
+    });
+}
+
+// Mensaje nuevo del clan en vivo (el servidor solo se lo manda a los miembros).
+socket.on('clanChat', (m) => addChatMessage(clanChatLog, m));
+
+// Enviar mensaje al clan.
+clanChatForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = clanChatInput.value.trim();
+    if (!text) return;
+    socket.emit('clanChat', text);
+    clanChatInput.value = '';
+    clanChatInput.focus();
+});
+
+// Algo cambió en mi clan (alguien entró, salió, fue expulsado o ascendido): refrescamos.
+socket.on('clanChanged', loadMyClan);
+
+// Avisos que me manda el servidor (por ejemplo "Fuiste expulsado del clan X").
+socket.on('clanNotice', (text) => {
+    clanMsg.textContent = 'ℹ️ ' + text;
 });
 
 // ============================================================
@@ -502,8 +714,10 @@ leaveClanBtn.addEventListener('click', () => {
 // Configuración del juego (llega al iniciar sesión, antes del estado).
 socket.on('config', (cfg) => {
     clanConfig = cfg;
+    if (cfg.chatTtlMs) chatTtlMs = cfg.chatTtlMs;
     buildStatsPanel(cfg.stats);
     updateClanButtons();
+    loadClanChat(); // también al reconectar, para no perder mensajes del clan.
 });
 
 // Dibuja el estado personal que mandó el servidor.
@@ -551,67 +765,13 @@ function renderState(s) {
     updateMissionButtons();
     updateClanButtons();
 
-    // Si cambió mi clan (entré, salí o recién cargó), pedimos los datos del clan.
+    // Si cambió mi clan (entré, salí, me expulsaron o recién cargó), pedimos los datos del clan y su chat.
     if (s.clan !== lastClanName) {
         lastClanName = s.clan;
         loadMyClan();
+        loadClanChat();
     }
 }
 
 // Estado personal (llega cada segundo y cuando algo cambia).
 socket.on('state', renderState);
-
-// ============================================================
-// CHAT
-// ============================================================
-const chatLog = document.getElementById('chatLog');
-const chatForm = document.getElementById('chatForm');
-const chatInput = document.getElementById('chatInput');
-
-// Agrega un mensaje a la caja del chat.
-function addMessage(m) {
-    // ¿Estaba el usuario mirando el final del chat? Si sí, bajamos solos después.
-    const nearBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
-
-    const div = document.createElement('div');
-    div.className = 'msg' + (m.name === myName ? ' mine' : '');
-
-    const time = document.createElement('span');
-    time.className = 'time';
-    time.textContent = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const name = document.createElement('strong');
-    name.textContent = m.name + ': ';
-
-    // textContent (no innerHTML) para que el HTML escrito por alguien no se ejecute (evita XSS).
-    const text = document.createElement('span');
-    text.textContent = m.text;
-
-    div.append(time, name, text);
-    chatLog.appendChild(div);
-
-    // Máximo 100 mensajes en pantalla.
-    while (chatLog.children.length > 100) chatLog.removeChild(chatLog.firstChild);
-
-    if (nearBottom || m.name === myName) chatLog.scrollTop = chatLog.scrollHeight;
-}
-
-// Historial (últimos 50 mensajes) al entrar o reconectar.
-socket.on('chatHistory', (list) => {
-    chatLog.innerHTML = '';
-    list.forEach(addMessage);
-    chatLog.scrollTop = chatLog.scrollHeight;
-});
-
-// Mensaje nuevo en vivo.
-socket.on('chat', addMessage);
-
-// Enviar mensaje (Enter o botón).
-chatForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    const text = chatInput.value.trim();
-    if (!text) return;
-    socket.emit('chat', text);
-    chatInput.value = '';
-    chatInput.focus();
-});
