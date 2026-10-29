@@ -187,3 +187,108 @@ chatForm.addEventListener('submit', (e) => {
     chatInput.value = '';  // limpiamos el campo.
     chatInput.focus(); // dejamos el cursor listo para el próximo mensaje.
 });
+
+// ============================================================
+// ENERGÍA, DINERO Y MISIONES (parte visual)
+// Este código NO calcula nada: solo muestra lo que manda el servidor.
+// ============================================================
+
+// Buscamos en el HTML los elementos del panel.
+const moneyValue = document.getElementById('moneyValue');
+const energyValue = document.getElementById('energyValue');
+const energyMax = document.getElementById('energyMax');
+const energyTimer = document.getElementById('energyTimer');
+const energyBar = document.getElementById('energyBar');
+const missionActive = document.getElementById('missionActive');
+const missionActiveText = document.getElementById('missionActiveText');
+const missionBar = document.getElementById('missionBar');
+const missionList = document.getElementById('missionList');
+const missionMsg = document.getElementById('missionMsg');
+
+let missionsData = []; // lista de misiones que manda el servidor.
+let lastState = null;  // último estado recibido (dinero, energía, misión).
+
+// Crea un botón por cada misión de la lista.
+function renderMissionButtons() {
+    missionList.innerHTML = ''; // vaciamos por si se vuelve a llamar (reconexión).
+    missionsData.forEach((m) => {
+        const btn = document.createElement('button');
+        btn.className = 'mission-btn';
+        btn.dataset.id = m.id; // guardamos el ID para encontrar el botón después.
+
+        // Título y detalle (usamos textContent: es más seguro que innerHTML).
+        const title = document.createElement('strong');
+        title.textContent = m.name;
+        const info = document.createElement('span');
+        info.textContent = `⚡ ${m.energy} · ⏱ ${m.durationMs / 1000}s · 💵 ${m.reward}`;
+        btn.append(title, info);
+
+        // Al hacer clic, le pedimos al servidor empezar esa misión.
+        // El servidor responde { ok, error } y mostramos el error si lo hay.
+        btn.addEventListener('click', () => {
+            missionMsg.textContent = '';
+            socket.emit('startMission', m.id, (res) => {
+                if (!res.ok) missionMsg.textContent = '⚠️ ' + res.error;
+            });
+        });
+
+        missionList.appendChild(btn);
+    });
+    updateMissionButtons();
+}
+
+// Desactiva los botones de misiones que no se pueden hacer ahora
+// (hay una misión en curso, o no alcanza la energía).
+// OJO: es solo visual. El servidor vuelve a validar todo igual.
+function updateMissionButtons() {
+    if (!lastState) return;
+    missionList.querySelectorAll('.mission-btn').forEach((btn) => {
+        const m = missionsData.find((x) => x.id === btn.dataset.id);
+        btn.disabled = !!lastState.mission || lastState.energy < m.energy;
+    });
+}
+
+// Dibuja en pantalla el estado que mandó el servidor.
+function renderState(s) {
+    lastState = s;
+
+    // Dinero y energía en texto.
+    moneyValue.textContent = s.money;
+    energyValue.textContent = s.energy;
+    energyMax.textContent = s.maxEnergy;
+
+    // Barra de energía: ancho = porcentaje.
+    energyBar.style.width = (s.energy / s.maxEnergy * 100) + '%';
+
+    // Cuánto falta para el próximo punto de energía.
+    energyTimer.textContent = s.nextEnergyMs > 0
+        ? `(+1 en ${Math.ceil(s.nextEnergyMs / 1000)}s)`
+        : '(llena)';
+
+    // Misión en curso: mostramos el progreso. Si no hay, ocultamos el bloque.
+    if (s.mission) {
+        const done = 1 - s.mission.remainingMs / s.mission.durationMs; // de 0 a 1.
+        missionActive.hidden = false;
+        missionActiveText.textContent =
+            `Haciendo: ${s.mission.name} — faltan ${Math.ceil(s.mission.remainingMs / 1000)}s`;
+        missionBar.style.width = (done * 100) + '%';
+    } else {
+        missionActive.hidden = true;
+    }
+
+    updateMissionButtons();
+}
+
+// El servidor nos manda la lista de misiones (al iniciar sesión).
+socket.on('missions', (list) => {
+    missionsData = list;
+    renderMissionButtons();
+});
+
+// El servidor nos manda nuestro estado (cada segundo y cuando algo cambia).
+socket.on('state', renderState);
+
+// El servidor avisa que terminó una misión y pagó la recompensa.
+socket.on('missionDone', ({ name, reward }) => {
+    missionMsg.textContent = `✅ Misión completada: ${name}. Ganaste 💵 ${reward}.`;
+});
