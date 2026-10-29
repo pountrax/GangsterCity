@@ -14,10 +14,14 @@
     --green: #22c55e;
     --blue: #2563eb;
     --red: #f87171;
+    --violet: #a78bfa;    /* color de la experiencia */
 }
 
 /* box-sizing: el padding y el borde NO agrandan los elementos (evita desbordes) */
 * { box-sizing: border-box; }
+
+/* Todo elemento con el atributo "hidden" se oculta, pase lo que pase */
+[hidden] { display: none !important; }
 
 body {
     margin: 0;
@@ -43,9 +47,6 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     padding: 16px;
     margin-bottom: 16px;           /* separación entre recuadros */
 }
-
-/* El atributo "hidden" a veces pierde contra "display": lo forzamos */
-#login[hidden], #game[hidden], #missionActive[hidden] { display: none; }
 
 /* ============================================================
    LOGIN
@@ -117,10 +118,10 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     border-radius: 12px;
 }
 .profile-name { font-size: 18px; font-weight: bold; word-break: break-word; }
+.profile-class { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .profile-level { color: var(--accent); font-size: 14px; margin-top: 2px; }
 
 .stat { margin-bottom: 10px; }
-.stat:last-child { margin-bottom: 0; }
 .stat-label { font-weight: bold; margin-bottom: 4px; font-size: 15px; }
 .stat-label small { font-weight: normal; color: var(--muted); margin-left: 6px; }
 
@@ -133,12 +134,35 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     transition: width 0.4s linear;      /* movimiento suave */
 }
 .mission-fill { background: var(--green); }   /* verde = misión */
+.xp-fill { background: var(--violet); }       /* violeta = experiencia */
+
+/* Panel que se abre al tocar "Editar perfil" */
+#editProfile {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#editProfile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+#editProfile input {
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#editProfile input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* ============================================================
    NAVEGACIÓN
    ============================================================ */
 #nav { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
 .nav-btn {
+    position: relative;            /* para ubicar el globito rojo */
     display: flex;
     align-items: center;
     gap: 10px;
@@ -154,6 +178,38 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
 .nav-btn:hover { border-color: var(--accent); }
 .nav-btn.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
 .nav-icon { font-size: 20px; }
+
+/* Globito rojo con la cantidad de puntos sin gastar */
+.badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    line-height: 20px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background: #ef4444;
+    border-radius: 10px;
+}
+
+/* ============================================================
+   BOTONES GENERALES
+   ============================================================ */
+.action-btn {
+    padding: 10px 16px;
+    font-size: 15px;
+    color: white;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.action-btn:disabled { background: var(--panel2); color: var(--muted); cursor: not-allowed; }
+.action-btn.full { width: 100%; margin-top: 4px; }
+.action-btn.small { padding: 6px 12px; font-size: 14px; }
+.action-btn.danger { background: #b91c1c; }
 
 /* ============================================================
    SECCIONES DEL CENTRO
@@ -198,6 +254,43 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
 .mission-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 #missionMsg { min-height: 18px; margin: 10px 0 0; font-size: 14px; }
 
+/* ---------- Estadísticas (dentro de Inventario) ---------- */
+.stats-box {
+    margin-bottom: 16px;
+    padding: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.stats-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.stats-head h3 { margin: 0; }
+.points-badge { font-size: 14px; color: var(--muted); }
+.points-badge strong { color: var(--accent); font-size: 18px; }
+/* Cada fila: nombre | valor | botón + */
+.stat-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-name { font-size: 15px; }
+.stat-value { font-weight: bold; min-width: 32px; text-align: right; }
+.plus-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    border-radius: 8px;
+    background: var(--green);
+    color: #0b1a10;
+    cursor: pointer;
+}
+.plus-btn:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; opacity: 0.5; }
+
 /* ---------- Inventario ---------- */
 #inventoryLayout { display: grid; grid-template-columns: 150px 1fr; gap: 16px; }
 #inventoryLayout h3 { margin-top: 0; }
@@ -235,16 +328,20 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
 .clan-card p { margin: 4px 0 0; }
 .clan-emblem { font-size: 40px; }
 .clan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-.action-btn {
-    padding: 10px 16px;
-    font-size: 15px;
+#clanMsg { min-height: 18px; }
+
+/* Formulario de una línea (campo + botón) */
+.inline-form { display: flex; gap: 8px; }
+.inline-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    font-size: 16px;
     color: var(--text);
-    background: var(--blue);
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
 }
-.action-btn:disabled { background: var(--panel2); color: var(--muted); cursor: not-allowed; }
 
 .simple-table { width: 100%; border-collapse: collapse; }
 .simple-table th, .simple-table td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
@@ -288,13 +385,31 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
 }
 
 /* ============================================================
-   RANKING
+   RANKINGS (con pestañas)
    ============================================================ */
-#scoreWrap { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
-#scoreboard { width: 100%; border-collapse: collapse; }
-#scoreboard th, #scoreboard td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: center; word-break: break-word; }
-#scoreboard th { background: var(--panel2); position: sticky; top: 0; }
-#scoreboard .me { background: rgba(245, 158, 11, 0.2); font-weight: bold; }
+#rankTabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.rank-tab {
+    padding: 8px 14px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.rank-tab:hover { border-color: var(--accent); }
+.rank-tab.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
+
+/* Solo el panel con la clase "active" se ve */
+.rank-pane { display: none; }
+.rank-pane.active { display: block; }
+
+.score-wrap { max-height: 260px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; }
+.board { width: 100%; border-collapse: collapse; }
+.board th, .board td { border-bottom: 1px solid var(--border); padding: 8px 10px; text-align: center; word-break: break-word; }
+.board th { background: var(--panel2); position: sticky; top: 0; }
+.board .me { background: rgba(245, 158, 11, 0.2); font-weight: bold; }
+.board .empty { color: var(--muted); }
 /* Puntito verde de "conectado" */
 .dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: var(--green); }
 
@@ -315,6 +430,8 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
         font-size: 12px;
         text-align: center;
     }
+    /* El globito rojo pasa a la esquina del botón */
+    .badge { position: absolute; top: 2px; right: 4px; margin-left: 0; }
     #content { min-height: 0; }
 }
 
@@ -323,5 +440,6 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     .panel { padding: 12px; }
     #inventoryLayout { grid-template-columns: 1fr; }   /* equipo arriba, mochila abajo */
     #chatLog { height: 180px; font-size: 14px; }
-    #scoreboard th, #scoreboard td { padding: 6px; font-size: 14px; }
+    .board th, .board td { padding: 6px; font-size: 14px; }
+    .rank-tab { flex: 1; padding: 8px 6px; font-size: 14px; }
 }
