@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <!-- Esta línea hace que el celular use su ancho real (necesaria para el diseño responsive) -->
+    <!-- Hace que el celular use su ancho real (necesaria para el diseño responsive) -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GangsterCity</title>
     <link rel="stylesheet" href="style.css">
@@ -10,7 +10,7 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 </head>
 <body>
-    <!-- #app: contenedor general. Limita el ancho máximo y lo centra en la pantalla -->
+    <!-- #app: contenedor general. Limita el ancho máximo y lo centra -->
     <div id="app">
 
         <!-- ================== PANTALLA DE INGRESO ================== -->
@@ -41,9 +41,15 @@
                             <div id="avatar">?</div>
                             <div>
                                 <div id="nameValue" class="profile-name">---</div>
-                                <!-- El nivel todavía no viene del servidor: por ahora es fijo en 1 -->
+                                <div id="classValue" class="profile-class">---</div>
                                 <div class="profile-level">Nivel <span id="levelValue">1</span></div>
                             </div>
+                        </div>
+
+                        <!-- Experiencia con su barra -->
+                        <div class="stat">
+                            <div class="stat-label">✨ XP: <span id="xpValue">0</span>/<span id="xpMax">100</span></div>
+                            <div class="bar"><div id="xpBar" class="bar-fill xp-fill"></div></div>
                         </div>
 
                         <!-- Dinero -->
@@ -60,16 +66,37 @@
                             <div class="bar"><div id="energyBar" class="bar-fill"></div></div>
                         </div>
 
-                        <!-- Puntaje de tiempo jugado (antes se dibujaba en el canvas) -->
+                        <!-- Fama -->
+                        <div class="stat">
+                            <div class="stat-label">⭐ Fama: <span id="fameValue">0</span></div>
+                        </div>
+
+                        <!-- Tiempo jugado (ranking de actividad) -->
                         <div class="stat">
                             <div class="stat-label">⏱ Tiempo jugado: <span id="scoreValue">0</span></div>
+                        </div>
+
+                        <!-- Botón de editar perfil + panel que se abre/cierra -->
+                        <button id="editProfileBtn" class="action-btn full" type="button">✏️ Editar perfil</button>
+                        <div id="editProfile" hidden>
+                            <label>Nombre de usuario
+                                <input id="editName" type="text" disabled>
+                            </label>
+                            <label>Foto de perfil
+                                <input type="file" accept="image/*" disabled>
+                            </label>
+                            <p class="muted">🚧 Próximamente: todavía no se pueden guardar cambios.</p>
                         </div>
                     </div>
 
                     <!-- Menú de navegación. data-tab indica qué sección abre cada botón -->
                     <nav class="panel" id="nav">
                         <button class="nav-btn active" data-tab="misiones"><span class="nav-icon">🎯</span> Misiones</button>
-                        <button class="nav-btn" data-tab="inventario"><span class="nav-icon">🎒</span> Inventario</button>
+                        <button class="nav-btn" data-tab="inventario">
+                            <span class="nav-icon">🎒</span> Inventario
+                            <!-- Globito rojo: aparece cuando hay puntos de estadística sin gastar -->
+                            <span id="inventoryBadge" class="badge" hidden>0</span>
+                        </button>
                         <button class="nav-btn" data-tab="guerra"><span class="nav-icon">⚔️</span> Guerra</button>
                         <button class="nav-btn" data-tab="clan"><span class="nav-icon">🏴</span> Clan</button>
                     </nav>
@@ -97,6 +124,18 @@
                     <!-- ===== INVENTARIO ===== -->
                     <section id="tab-inventario" class="tab">
                         <h2>Inventario</h2>
+
+                        <!-- Estadísticas del personaje -->
+                        <div class="stats-box">
+                            <div class="stats-head">
+                                <h3>Estadísticas</h3>
+                                <div class="points-badge">Puntos disponibles: <strong id="statPointsValue">0</strong></div>
+                            </div>
+                            <!-- Las filas (Vida, Aguante...) las crea script.js -->
+                            <div id="statsList"></div>
+                            <p id="statsMsg" class="muted"></p>
+                        </div>
+
                         <div id="inventoryLayout">
                             <!-- Ranuras de equipo (lo que lleva puesto el personaje) -->
                             <div id="equipment">
@@ -125,23 +164,47 @@
                     <!-- ===== CLAN ===== -->
                     <section id="tab-clan" class="tab">
                         <h2>Clan</h2>
-                        <div class="clan-card">
-                            <div class="clan-emblem">🏴</div>
-                            <div>
-                                <strong>Sin clan</strong>
-                                <p class="muted">Todavía no pertenecés a ningún clan.</p>
+
+                        <!-- MI CLAN (solo se ve si pertenecés a uno) -->
+                        <div id="myClanBox" hidden>
+                            <div class="clan-card">
+                                <div class="clan-emblem">🏴</div>
+                                <div>
+                                    <strong id="clanName">---</strong>
+                                    <p class="muted" id="clanInfo"></p>
+                                </div>
+                            </div>
+                            <h3>Miembros</h3>
+                            <table class="simple-table">
+                                <thead><tr><th>Usuario</th><th>Nivel</th><th>Rango</th></tr></thead>
+                                <tbody id="clanMembers"></tbody>
+                            </table>
+                            <div class="clan-actions">
+                                <button id="leaveClanBtn" class="action-btn danger" type="button">Salir del clan</button>
                             </div>
                         </div>
-                        <!-- Botones desactivados hasta que exista la función en el servidor -->
-                        <div class="clan-actions">
-                            <button class="action-btn" disabled>Crear clan</button>
-                            <button class="action-btn" disabled>Buscar clan</button>
+
+                        <!-- CREAR CLAN (solo se ve si NO tenés clan) -->
+                        <div id="createClanBox">
+                            <h3>Crear clan</h3>
+                            <p class="muted" id="createClanReq">Requiere nivel 10.</p>
+                            <form id="createClanForm" class="inline-form">
+                                <input id="clanNameInput" type="text" maxlength="20" placeholder="Nombre del clan" autocomplete="off">
+                                <button type="submit" id="createClanBtn" class="action-btn" disabled>Crear</button>
+                            </form>
                         </div>
-                        <h3>Miembros</h3>
-                        <table class="simple-table">
-                            <thead><tr><th>Usuario</th><th>Rango</th></tr></thead>
-                            <tbody><tr><td colspan="2" class="muted">Sin miembros</td></tr></tbody>
-                        </table>
+
+                        <!-- CLANES DISPONIBLES (solo se ve si NO tenés clan) -->
+                        <div id="joinClanBox">
+                            <h3>Clanes disponibles</h3>
+                            <p class="muted" id="joinClanReq">Requiere nivel 5 para unirse.</p>
+                            <table class="simple-table">
+                                <thead><tr><th>Clan</th><th>Miembros</th><th></th></tr></thead>
+                                <tbody id="clanJoinList"></tbody>
+                            </table>
+                        </div>
+
+                        <p id="clanMsg" class="muted"></p>
                     </section>
                 </main>
             </div>
@@ -157,16 +220,45 @@
             </div>
         </div>
 
-        <!-- ================== RANKING GLOBAL (visible siempre, también antes de entrar) ================== -->
+        <!-- ================== RANKINGS (visibles siempre, también antes de entrar) ================== -->
         <section class="panel" id="ranking">
-            <h2>🏆 Ranking global</h2>
-            <div id="scoreWrap">
-                <table id="scoreboard">
-                    <thead>
-                        <tr><th>#</th><th>Usuario</th><th>Puntos</th></tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
+            <h2>🏆 Rankings</h2>
+
+            <!-- Pestañas de rankings. data-rank indica cuál panel abre cada botón -->
+            <div id="rankTabs">
+                <button class="rank-tab active" data-rank="actividad">⏱ Actividad</button>
+                <button class="rank-tab" data-rank="clanes">🏴 Clanes</button>
+                <button class="rank-tab" data-rank="fama">⭐ Fama</button>
+            </div>
+
+            <!-- 1) Ranking de actividad (tiempo jugado) -->
+            <div id="rank-actividad" class="rank-pane active">
+                <div class="score-wrap">
+                    <table id="scoreboard" class="board">
+                        <thead><tr><th>#</th><th>Usuario</th><th>Puntos</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 2) Ranking de clanes (por fama total de sus miembros) -->
+            <div id="rank-clanes" class="rank-pane">
+                <div class="score-wrap">
+                    <table id="clanBoard" class="board">
+                        <thead><tr><th>#</th><th>Clan</th><th>Miembros</th><th>Fama</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 3) Ranking de fama de personaje -->
+            <div id="rank-fama" class="rank-pane">
+                <div class="score-wrap">
+                    <table id="fameBoard" class="board">
+                        <thead><tr><th>#</th><th>Usuario</th><th>Nivel</th><th>Fama</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
             </div>
         </section>
     </div>
