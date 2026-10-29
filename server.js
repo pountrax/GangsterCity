@@ -1,6 +1,6 @@
 // ============================================================
-// server.js — Servidor del juego (v4: experiencia, estadísticas,
-// clases, fama y clanes)
+// server.js — Servidor del juego (v5: clanes con rangos y chat de clan,
+// y borrado automático de mensajes viejos)
 // El servidor es el ÚNICO que decide niveles, dinero, energía,
 // estadísticas y clanes. El navegador solo pide acciones y muestra
 // el resultado.
@@ -18,11 +18,11 @@ const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
 // Ruta de prueba: sirve para verificar qué versión corre en Render.
-app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v4 experiencia, stats y clanes'));
+app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v5 clan: miembros, rangos y chat'));
 
 // La URL de MongoDB está en las variables de entorno de Render (nunca en el código).
 const client = new MongoClient(process.env.MONGODB_URI);
-let users, messages, clans; // colecciones de la base, se llenan en start().
+let users, messages, clans, clanMessages; // colecciones de la base, se llenan en start().
 
 // ============================================================
 // CONFIGURACIÓN DEL JUEGO (acá ajustás los números)
@@ -33,11 +33,16 @@ const ENERGY_REGEN_MS = 10000;   // cada cuántos ms se recupera 1 de energía (
 
 const POINTS_PER_LEVEL = 5;      // puntos de estadística que da cada nivel.
 const XP_BASE = 100;             // XP necesaria para pasar del nivel 1 al 2.
-const XP_GROWTH = 1.1;           // cada nivel pide 10% más XP que el anterior ("un poco más lento").
+const XP_GROWTH = 1.1;           // cada nivel pide 10% más XP que el anterior.
 
 const CLAN_JOIN_LEVEL = 5;       // nivel mínimo para unirse a un clan.
 const CLAN_CREATE_LEVEL = 10;    // nivel mínimo para crear un clan.
 const CLAN_MAX_MEMBERS = 30;     // máximo de miembros por clan.
+const CLAN_ROLES = ['miembro', 'oficial']; // rangos que el líder puede asignar (el líder es aparte).
+
+// Cuánto viven los mensajes antes de que MongoDB los borre solo.
+const CHAT_TTL_SECONDS = 30 * 60;              // chat global: 30 minutos.
+const CLAN_CHAT_TTL_SECONDS = 7 * 24 * 60 * 60; // chat de clan: 7 días.
 
 // Estadísticas del personaje (el "id" es el nombre interno, el "label" el que se ve).
 const STATS = [
@@ -60,10 +65,8 @@ const CLASSES = {
 const DEFAULT_CLASS = 'maton'; // clase que reciben todos los personajes por ahora.
 
 // Lista de misiones. Para agregar una, copiá una línea y cambiá los datos.
-// - energy: energía que cuesta empezarla.
-// - durationMs: cuánto tarda (en milisegundos).
-// - reward: dinero que paga.
-// - xp: experiencia que da.
+// - energy: energía que cuesta empezarla.  - durationMs: cuánto tarda (ms).
+// - reward: dinero que paga.               - xp: experiencia que da.
 const MISSIONS = [
     { id: 'carteras', name: 'Robar carteras',     energy: 5,  durationMs: 10000, reward: 20,  xp: 20  },
     { id: 'tienda',   name: 'Asaltar una tienda', energy: 15, durationMs: 30000, reward: 70,  xp: 60  },
@@ -75,8 +78,8 @@ const MISSIONS = [
 // ============================================================
 
 // Jugadores conectados AHORA. Formato:
-// { socketId: { key, name, score, lastMsg, money, energy, energyAt, mission,
-//               level, xp, fame, statPoints, stats, cls, clanId, clanName, busy } }
+// { socketId: { key, name, score, lastMsg, lastClanMsg, money, energy, energyAt, mission,
+//               level, xp, fame, statPoints, stats, cls, clanId, clanName, clanRole, busy } }
 const online = {};
 
 // Cachés leídos de la base cada 10 segundos (incluyen jugadores desconectados):
@@ -94,14 +97,12 @@ function hashPassword(password, salt) {
 }
 
 // XP necesaria para pasar del nivel "level" al siguiente.
-// Nivel 1 → 100, nivel 2 → 110, nivel 3 → 121, etc.
 function xpNeeded(level) {
     return Math.round(XP_BASE * Math.pow(XP_GROWTH, level - 1));
 }
 
 // Suma experiencia y sube de nivel las veces que haga falta.
-// Cada nivel da puntos de estadística y +1 de fama.
-// Devuelve cuántos niveles subió.
+// Cada nivel da puntos de estadística y +1 de fama. Devuelve cuántos niveles subió.
 function addXp(p, amount) {
     p.xp += amount;
     let gained = 0;
@@ -123,7 +124,7 @@ function buildPlayer(key, user, now) {
     const stats = {};
     STAT_IDS.forEach(id => { stats[id] = user.stats?.[id] ?? base[id]; });
     return {
-        key, name: user.name, score: user.score ?? 0, lastMsg: 0,
+        key, name: user.name, score: user.score ?? 0, lastMsg: 0, lastClanMsg: 0,
         money: user.money ?? 0,
         energy: user.energy ?? MAX_ENERGY,
         energyAt: user.energyAt ?? now,
@@ -134,12 +135,35 @@ function buildPlayer(key, user, now) {
         statPoints: user.statPoints ?? 0,
         stats, cls,
         clanId: user.clanId ?? null,
-        clanName: null,   // se completa al iniciar sesión.
-        busy: false       // evita que dos acciones de clan se ejecuten a la vez.
+        clanName: null,                          // se completa al iniciar sesión.
+        clanRole: user.clanRole ?? 'miembro',    // 'miembro' u 'oficial' (el líder se sabe por clan.owner).
+        busy: false                              // evita que dos acciones de clan se ejecuten a la vez.
     };
 }
 
-// Recarga los rankings desde MongoDB (se llama cada 10 s y cuando cambian los clanes).
+// Busca a un jugador CONECTADO por su key (nombre en minúsculas).
+// Devuelve { id, p } o null si no está conectado.
+function findOnlineByKey(key) {
+    const entry = Object.entries(online).find(([, p]) => p.key === key);
+    return entry ? { id: entry[0], p: entry[1] } : null;
+}
+
+// Manda un evento a TODOS los conectados que pertenecen a un clan.
+// (Recorremos a los conectados: son pocos y así no dependemos de "salas" de Socket.IO.)
+function emitToClan(clanId, event, data) {
+    Object.entries(online).forEach(([id, p]) => {
+        if (p.clanId === clanId) io.to(id).emit(event, data);
+    });
+}
+
+// Devuelve el clan del jugador SOLO si él es el líder; si no, null.
+async function getClanIfLeader(p) {
+    if (!p.clanId) return null;
+    const clan = await clans.findOne({ _id: p.clanId });
+    return clan && clan.owner === p.key ? clan : null;
+}
+
+// Recarga los rankings desde MongoDB (cada 10 s y cuando cambian los clanes).
 async function refreshTop() {
     try {
         // Top 50 por tiempo jugado.
@@ -159,7 +183,6 @@ async function refreshTop() {
             { $sort: { fame: -1, members: -1 } },
             { $limit: 50 }
         ]).toArray();
-        // Buscamos el nombre "bonito" de cada clan.
         const clanDocs = await clans.find({ _id: { $in: groups.map(g => g._id) } }).toArray();
         const names = new Map(clanDocs.map(c => [c._id, c.name]));
         clanCache = groups
@@ -223,14 +246,14 @@ async function saveProgress(list) {
                 statPoints: p.statPoints,
                 stats: p.stats,
                 class: p.cls,
-                clanId: p.clanId
+                clanId: p.clanId,
+                clanRole: p.clanRole
             } }
         }
     })));
 }
 
 // ENERGÍA: se calcula según el tiempo pasado, no con un contador.
-// Por eso se recarga aunque el jugador esté desconectado.
 function refreshEnergy(p, now) {
     if (p.energy >= MAX_ENERGY) {
         p.energy = MAX_ENERGY;
@@ -245,11 +268,10 @@ function refreshEnergy(p, now) {
 }
 
 // MISIÓN: si ya pasó la hora de fin, la completa y paga dinero, XP y fama.
-// Devuelve un resumen para avisarle al jugador, o null si no terminó nada.
 function finishMissionIfDone(p, now) {
     if (!p.mission || now < p.mission.endsAt) return null;
     const mission = MISSIONS.find(m => m.id === p.mission.id);
-    p.mission = null; // la misión terminó, el jugador queda libre.
+    p.mission = null;
     if (!mission) return null;
 
     p.money += mission.reward;                    // dinero.
@@ -260,7 +282,6 @@ function finishMissionIfDone(p, now) {
 }
 
 // Arma el "estado personal" que se le manda a UN jugador (solo suyo).
-// Mandamos tiempos RESTANTES (no horas absolutas) para que no importe el reloj de su compu.
 function buildState(p, now) {
     const mission = p.mission ? MISSIONS.find(m => m.id === p.mission.id) : null;
     return {
@@ -333,7 +354,8 @@ io.on('connection', (socket) => {
                     statPoints: 0,
                     class: DEFAULT_CLASS,
                     stats: { ...CLASSES[DEFAULT_CLASS].stats }, // copia de las stats base de la clase.
-                    clanId: null
+                    clanId: null,
+                    clanRole: 'miembro'
                 };
                 await users.insertOne(user);
             } else {
@@ -366,7 +388,8 @@ io.on('connection', (socket) => {
                 stats: STATS,
                 clanJoinLevel: CLAN_JOIN_LEVEL,
                 clanCreateLevel: CLAN_CREATE_LEVEL,
-                pointsPerLevel: POINTS_PER_LEVEL
+                pointsPerLevel: POINTS_PER_LEVEL,
+                chatTtlMs: CHAT_TTL_SECONDS * 1000   // para que la página oculte mensajes vencidos.
             });
             socket.emit('missions', MISSIONS);
             sendState(socket.id, player, now);
@@ -376,8 +399,10 @@ io.on('connection', (socket) => {
             }
             broadcast();
 
-            // Historial del chat (últimos 50 mensajes).
-            const last = await messages.find().sort({ ts: -1 }).limit(50).toArray();
+            // Historial del chat global: solo los últimos 30 minutos (máximo 50 mensajes).
+            // Filtramos por hora porque MongoDB borra los vencidos con hasta ~1 minuto de demora.
+            const since = Date.now() - CHAT_TTL_SECONDS * 1000;
+            const last = await messages.find({ ts: { $gte: since } }).sort({ ts: -1 }).limit(50).toArray();
             socket.emit('chatHistory', last.reverse().map(m => ({
                 name: m.name, text: m.text, ts: m.ts
             })));
@@ -405,7 +430,6 @@ io.on('connection', (socket) => {
             return reply({ ok: false, error: 'No tenés suficiente energía.' });
         }
 
-        // Todo OK: gastamos la energía y arrancamos la misión.
         p.energy -= mission.energy;
         p.mission = { id: mission.id, endsAt: now + mission.durationMs };
 
@@ -416,18 +440,16 @@ io.on('connection', (socket) => {
     });
 
     // ---------- GASTAR UN PUNTO DE ESTADÍSTICA ----------
-    // El cliente manda solo el ID de la estadística. El servidor valida todo.
     socket.on('spendStat', async (statId, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
 
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
-        // Solo aceptamos IDs de nuestra lista (el cliente no puede inventar estadísticas).
         if (!STAT_IDS.includes(statId)) return reply({ ok: false, error: 'Esa estadística no existe.' });
         if (p.statPoints < 1) return reply({ ok: false, error: 'No tenés puntos disponibles.' });
 
-        p.stats[statId]++;   // +1 a la estadística elegida.
-        p.statPoints--;      // -1 punto disponible.
+        p.stats[statId]++;
+        p.statPoints--;
 
         sendState(socket.id, p, Date.now());
         reply({ ok: true });
@@ -437,7 +459,7 @@ io.on('connection', (socket) => {
 
     // ---------- CLANES ----------
 
-    // Crear un clan (requiere nivel CLAN_CREATE_LEVEL).
+    // Crear un clan (requiere nivel CLAN_CREATE_LEVEL). El creador queda como líder.
     socket.on('createClan', async (rawName, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -449,7 +471,6 @@ io.on('connection', (socket) => {
             if (p.level < CLAN_CREATE_LEVEL) {
                 return reply({ ok: false, error: `Necesitás nivel ${CLAN_CREATE_LEVEL} para crear un clan.` });
             }
-            // Limpiamos el nombre: texto, sin espacios dobles, máximo 20 caracteres.
             const name = String(rawName || '').trim().replace(/\s+/g, ' ').slice(0, 20);
             if (name.length < 3) return reply({ ok: false, error: 'El nombre del clan debe tener al menos 3 caracteres.' });
 
@@ -457,14 +478,14 @@ io.on('connection', (socket) => {
             try {
                 await clans.insertOne({ _id: key, name, owner: p.key, createdAt: Date.now() });
             } catch (e) {
-                // Código 11000 = ya existe un documento con ese _id.
                 if (e.code === 11000) return reply({ ok: false, error: 'Ya existe un clan con ese nombre.' });
                 throw e;
             }
             p.clanId = key;
             p.clanName = name;
-            await users.updateOne({ _id: p.key }, { $set: { clanId: key } });
-            await refreshTop();  // para que el clan aparezca en el ranking.
+            p.clanRole = 'miembro';
+            await users.updateOne({ _id: p.key }, { $set: { clanId: key, clanRole: 'miembro' } });
+            await refreshTop();
             broadcastSlow();
             reply({ ok: true });
         } catch (e) {
@@ -487,7 +508,6 @@ io.on('connection', (socket) => {
             if (p.level < CLAN_JOIN_LEVEL) {
                 return reply({ ok: false, error: `Necesitás nivel ${CLAN_JOIN_LEVEL} para unirte a un clan.` });
             }
-            // String(...) evita que el cliente mande un objeto raro en vez de un texto.
             const clan = await clans.findOne({ _id: String(clanKey || '') });
             if (!clan) return reply({ ok: false, error: 'Ese clan no existe.' });
 
@@ -496,9 +516,11 @@ io.on('connection', (socket) => {
 
             p.clanId = clan._id;
             p.clanName = clan.name;
-            await users.updateOne({ _id: p.key }, { $set: { clanId: clan._id } });
+            p.clanRole = 'miembro';
+            await users.updateOne({ _id: p.key }, { $set: { clanId: clan._id, clanRole: 'miembro' } });
             await refreshTop();
             broadcastSlow();
+            emitToClan(clan._id, 'clanChanged'); // los demás miembros ven al nuevo en la lista.
             reply({ ok: true });
         } catch (e) {
             console.error(e);
@@ -508,7 +530,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Salir del clan. Si era el líder, pasa a otro miembro; si no queda nadie, se borra el clan.
+    // Salir del clan. Si era el líder, hereda un Oficial (o, si no hay, otro miembro);
+    // si no queda nadie, se borra el clan y su chat.
     socket.on('leaveClan', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -521,17 +544,25 @@ io.on('connection', (socket) => {
             const clanKey = p.clanId;
             p.clanId = null;
             p.clanName = null;
-            await users.updateOne({ _id: p.key }, { $set: { clanId: null } });
+            p.clanRole = 'miembro';
+            await users.updateOne({ _id: p.key }, { $set: { clanId: null, clanRole: 'miembro' } });
 
             const clan = await clans.findOne({ _id: clanKey });
             if (clan && clan.owner === p.key) {
-                // Era el líder: buscamos a otro miembro para que herede el clan.
-                const next = await users.findOne({ clanId: clanKey }, { projection: { _id: 1 } });
-                if (next) await clans.updateOne({ _id: clanKey }, { $set: { owner: next._id } });
-                else await clans.deleteOne({ _id: clanKey }); // no queda nadie: se borra.
+                // Era el líder: primero buscamos un Oficial; si no hay, cualquier miembro.
+                const next =
+                    await users.findOne({ clanId: clanKey, clanRole: 'oficial' }, { projection: { _id: 1 } }) ||
+                    await users.findOne({ clanId: clanKey }, { projection: { _id: 1 } });
+                if (next) {
+                    await clans.updateOne({ _id: clanKey }, { $set: { owner: next._id } });
+                } else {
+                    await clans.deleteOne({ _id: clanKey });             // no queda nadie: se borra el clan
+                    await clanMessages.deleteMany({ clanId: clanKey });  // y también su chat.
+                }
             }
             await refreshTop();
             broadcastSlow();
+            emitToClan(clanKey, 'clanChanged'); // los que quedan ven la lista actualizada.
             reply({ ok: true });
         } catch (e) {
             console.error(e);
@@ -541,7 +572,94 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Datos de MI clan (nombre y lista de miembros). El cliente lo pide al abrir la pestaña Clan.
+    // EXPULSAR a un miembro (solo el líder).
+    socket.on('kickMember', async (targetKey, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
+        p.busy = true;
+        try {
+            const clan = await getClanIfLeader(p); // verificamos EN EL SERVIDOR que sea el líder.
+            if (!clan) return reply({ ok: false, error: 'Solo el líder del clan puede hacer esto.' });
+
+            const key = String(targetKey || '');
+            if (key === p.key) return reply({ ok: false, error: 'No podés expulsarte a vos mismo. Usá "Salir del clan".' });
+
+            // Si el expulsado está conectado, actualizamos su memoria PRIMERO.
+            // (Si no, el guardado automático de cada 10 s volvería a escribir su clan viejo.)
+            const target = findOnlineByKey(key);
+            if (target) {
+                if (target.p.clanId !== clan._id) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+                target.p.clanId = null;
+                target.p.clanName = null;
+                target.p.clanRole = 'miembro';
+            }
+            // El filtro { clanId } asegura que solo se expulse a alguien de ESTE clan.
+            const res = await users.updateOne(
+                { _id: key, clanId: clan._id },
+                { $set: { clanId: null, clanRole: 'miembro' } }
+            );
+            if (!target && res.matchedCount === 0) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+
+            if (target) {
+                // Le avisamos al expulsado y le mandamos su estado nuevo (sin clan).
+                io.to(target.id).emit('clanNotice', `Fuiste expulsado del clan ${clan.name}.`);
+                sendState(target.id, target.p, Date.now());
+            }
+            await refreshTop();
+            broadcastSlow();
+            emitToClan(clan._id, 'clanChanged');
+            reply({ ok: true });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        } finally {
+            p.busy = false;
+        }
+    });
+
+    // ASCENDER o DEGRADAR a un miembro (solo el líder). data = { key, role }.
+    socket.on('setMemberRole', async (data, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
+        p.busy = true;
+        try {
+            const clan = await getClanIfLeader(p);
+            if (!clan) return reply({ ok: false, error: 'Solo el líder del clan puede hacer esto.' });
+
+            const key = String(data?.key || '');
+            const role = data?.role;
+            if (!CLAN_ROLES.includes(role)) return reply({ ok: false, error: 'Rango inválido.' });
+            if (key === p.key) return reply({ ok: false, error: 'No podés cambiar tu propio rango.' });
+
+            // Igual que al expulsar: si está conectado, actualizamos su memoria primero.
+            const target = findOnlineByKey(key);
+            if (target) {
+                if (target.p.clanId !== clan._id) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+                target.p.clanRole = role;
+            }
+            const res = await users.updateOne({ _id: key, clanId: clan._id }, { $set: { clanRole: role } });
+            if (!target && res.matchedCount === 0) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+
+            if (target) {
+                io.to(target.id).emit('clanNotice', role === 'oficial'
+                    ? `Fuiste ascendido a Oficial en ${clan.name}.`
+                    : `Ya no sos Oficial en ${clan.name}.`);
+            }
+            emitToClan(clan._id, 'clanChanged');
+            reply({ ok: true });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        } finally {
+            p.busy = false;
+        }
+    });
+
+    // Datos de MI clan (nombre, mi rango y lista de miembros).
     socket.on('getClan', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -551,31 +669,68 @@ io.on('connection', (socket) => {
             if (!clan) return reply({ ok: true, clan: null });
 
             const docs = await users
-                .find({ clanId: p.clanId }, { projection: { name: 1, level: 1 } })
+                .find({ clanId: p.clanId }, { projection: { name: 1, level: 1, clanRole: 1 } })
                 .limit(CLAN_MAX_MEMBERS).toArray();
 
             const members = docs.map(m => {
-                // Si el miembro está conectado usamos su nivel en vivo.
-                const live = Object.values(online).find(o => o.key === m._id);
+                const live = findOnlineByKey(m._id); // si está conectado usamos sus datos en vivo.
+                const stored = live ? live.p.clanRole : (m.clanRole ?? 'miembro');
                 return {
+                    key: m._id,                                   // sirve para expulsar/ascender.
                     name: m.name,
-                    level: live ? live.level : (m.level ?? 1),
-                    role: m._id === clan.owner ? 'Líder' : 'Miembro'
+                    level: live ? live.p.level : (m.level ?? 1),
+                    role: m._id === clan.owner ? 'lider' : stored, // 'lider' | 'oficial' | 'miembro'
+                    online: !!live
                 };
             });
-            // Primero el líder, después por nivel de mayor a menor.
-            members.sort((a, b) => {
-                if (a.role !== b.role) return a.role === 'Líder' ? -1 : 1;
-                return b.level - a.level;
-            });
-            reply({ ok: true, clan: { name: clan.name, members } });
+            // Orden: líder, oficiales, miembros; dentro de cada grupo, por nivel.
+            const order = { lider: 0, oficial: 1, miembro: 2 };
+            members.sort((a, b) => order[a.role] - order[b.role] || b.level - a.level);
+
+            const me = members.find(m => m.key === p.key);
+            reply({ ok: true, clan: { name: clan.name, myRole: me ? me.role : 'miembro', members } });
         } catch (e) {
             console.error(e);
             reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
         }
     });
 
-    // ---------- CHAT ----------
+    // ---------- CHAT DE CLAN ----------
+
+    // Historial del chat de MI clan (últimos 50 mensajes).
+    socket.on('getClanChat', async (cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p || !p.clanId) return reply({ ok: true, messages: [] });
+        try {
+            const last = await clanMessages.find({ clanId: p.clanId }).sort({ ts: -1 }).limit(50).toArray();
+            reply({ ok: true, messages: last.reverse().map(m => ({ name: m.name, text: m.text, ts: m.ts })) });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, messages: [] });
+        }
+    });
+
+    // Mensaje nuevo en el chat de clan: solo lo reciben los miembros de ese clan.
+    socket.on('clanChat', async (text) => {
+        const p = online[socket.id];
+        if (!p || !p.clanId) return; // hay que estar logueado y tener clan.
+
+        const clean = String(text || '').trim().slice(0, 200);
+        if (!clean) return;
+
+        const now = Date.now();
+        if (now - p.lastClanMsg < 700) return; // anti-spam.
+        p.lastClanMsg = now;
+
+        const clanId = p.clanId; // lo guardamos por si cambia mientras esperamos a la base.
+        const msg = { name: p.name, text: clean, ts: now };
+        emitToClan(clanId, 'clanChat', msg);
+        // "createdAt" es una fecha real: el índice TTL la usa para borrar mensajes viejos.
+        try { await clanMessages.insertOne({ clanId, ...msg, createdAt: new Date(now) }); } catch (e) { console.error(e); }
+    });
+
+    // ---------- CHAT GLOBAL ----------
     socket.on('chat', async (text) => {
         const p = online[socket.id];
         if (!p) return; // solo escriben los logueados.
@@ -589,7 +744,8 @@ io.on('connection', (socket) => {
 
         const msg = { name: p.name, text: clean, ts: now };
         io.emit('chat', msg);
-        try { await messages.insertOne({ ...msg }); } catch (e) { console.error(e); }
+        // "createdAt" es una fecha real: MongoDB la usa para borrar el mensaje a los 30 minutos.
+        try { await messages.insertOne({ ...msg, createdAt: new Date(now) }); } catch (e) { console.error(e); }
     });
 
     // ---------- DESCONEXIÓN ----------
@@ -617,7 +773,6 @@ setInterval(async () => {
         p.score++;                  // +1 punto por segundo (ranking de actividad).
         refreshEnergy(p, now);      // recarga de energía.
 
-        // ¿Terminó su misión? Si sí, ya se pagó todo: avisamos y guardamos.
         const finished = finishMissionIfDone(p, now);
         if (finished) {
             io.to(id).emit('missionDone', finished);
@@ -642,11 +797,29 @@ setInterval(async () => {
 // ARRANQUE
 // ============================================================
 async function start() {
-    await client.connect();                 // conecta a MongoDB.
+    await client.connect();                       // conecta a MongoDB.
     const db = client.db('juego');
-    users = db.collection('users');         // usuarios y todo su progreso.
-    messages = db.collection('messages');   // historial del chat.
-    clans = db.collection('clans');         // clanes (se crea sola al crear el primero).
+    users = db.collection('users');               // usuarios y todo su progreso.
+    messages = db.collection('messages');         // chat global (los mensajes se borran solos).
+    clans = db.collection('clans');               // clanes.
+    clanMessages = db.collection('clanMessages'); // chat de clan.
+
+    // Preparamos los índices. Si algo falla, lo mostramos pero el servidor arranca igual.
+    try {
+        // Mensajes viejos (de antes de esta versión) no tienen "createdAt":
+        // se lo agregamos a partir de su "ts" para que el índice TTL también los borre.
+        await messages.updateMany(
+            { createdAt: { $exists: false } },
+            [{ $set: { createdAt: { $toDate: '$ts' } } }]
+        );
+        // Índice TTL: MongoDB borra solo los documentos cuyo "createdAt" tiene más de N segundos.
+        await messages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_TTL_SECONDS });
+        await clanMessages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CLAN_CHAT_TTL_SECONDS });
+        // Índices comunes: hacen más rápidas las búsquedas por clan.
+        await clanMessages.createIndex({ clanId: 1, ts: -1 });
+        await users.createIndex({ clanId: 1 });
+    } catch (e) { console.error('Error creando índices:', e); }
+
     await refreshTop();
     server.listen(process.env.PORT || 3000, () => console.log('Servidor corriendo'));
 }
