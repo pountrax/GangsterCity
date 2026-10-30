@@ -1,8 +1,8 @@
 // ============================================================
 // script.js — Lo que corre en el NAVEGADOR del jugador
 // Muestra el login, el panel del personaje, el menú, las misiones,
-// el inventario con estadísticas, los clanes (miembros y chat), los
-// rankings y el chat global.
+// el inventario con estadísticas, la guerra, los clanes, los rankings
+// y el chat global.
 // NO calcula nada del juego: solo pide cosas al servidor (server.js)
 // y muestra lo que el servidor devuelve.
 // ============================================================
@@ -44,8 +44,10 @@ let credentials = null;
 let myName = null;
 // Último estado personal que mandó el servidor (dinero, energía, nivel, etc.).
 let lastState = null;
-// Configuración del juego que manda el servidor (niveles de clan, lista de estadísticas).
-let clanConfig = null;
+// Configuración del juego que manda el servidor (niveles de clan, costos, etc.).
+let gameConfig = null;
+// Lista de estadísticas (id, nombre, icono) que manda el servidor.
+let statsConfig = [];
 // Cuánto dura un mensaje del chat global (el servidor lo confirma al entrar).
 let chatTtlMs = 30 * 60 * 1000;
 
@@ -270,48 +272,79 @@ function renderInventory(items = []) {
 renderInventory();
 
 // ============================================================
-// ESTADÍSTICAS (Vida, Aguante, Velocidad, Inteligencia, Suerte)
+// ESTADÍSTICAS (Vida, Daño, Aguante, Velocidad, Inteligencia, Suerte)
+// Cada fila: nombre + efecto | valor | botón "+" (puntos de nivel) | botón 💵 (comprar)
 // ============================================================
 const statsList = document.getElementById('statsList');
 const statsMsg = document.getElementById('statsMsg');
 const statPointsValue = document.getElementById('statPointsValue');
 const inventoryBadge = document.getElementById('inventoryBadge');
 
-let statRows = {}; // { vida: { value, btn }, ... } para actualizar cada fila.
+let statRows = {}; // { vida: { value, effect, plus, buy }, ... } para actualizar cada fila.
 
 // Crea una fila por cada estadística (la lista viene del servidor).
 function buildStatsPanel(list) {
     statsList.innerHTML = '';
     statRows = {};
+
+    // Aviso con el precio de comprar puntos (se recrea para no duplicarlo al reconectar).
+    const oldHint = document.getElementById('statsHint');
+    if (oldHint) oldHint.remove();
+    const hint = document.createElement('p');
+    hint.id = 'statsHint';
+    hint.className = 'muted';
+    hint.textContent = `➕ usa tus puntos disponibles. 💵 ${gameConfig.statCost} compra 1 punto de esa estadística.`;
+    statsList.after(hint);
+
     list.forEach((s) => {
         const row = document.createElement('div');
         row.className = 'stat-row';
 
+        // Nombre y, debajo, el efecto real (lo calcula el servidor).
+        const info = document.createElement('div');
+        info.className = 'stat-info';
         const label = document.createElement('span');
         label.className = 'stat-name';
         label.textContent = `${s.icon} ${s.label}`;
+        const effect = document.createElement('span');
+        effect.className = 'stat-effect';
+        info.append(label, effect);
 
         const value = document.createElement('span');
         value.className = 'stat-value';
         value.textContent = '0';
 
-        // Botón "+": le pide al servidor gastar un punto en esta estadística.
-        const btn = document.createElement('button');
-        btn.className = 'plus-btn';
-        btn.type = 'button';
-        btn.textContent = '+';
-        btn.title = 'Subir ' + s.label;
-        btn.disabled = true;
-        btn.addEventListener('click', () => {
+        // Botón "+": gasta un punto de nivel.
+        const plus = document.createElement('button');
+        plus.className = 'plus-btn';
+        plus.type = 'button';
+        plus.textContent = '+';
+        plus.title = 'Subir ' + s.label + ' con un punto disponible';
+        plus.disabled = true;
+        plus.addEventListener('click', () => {
             statsMsg.textContent = '';
             socket.emit('spendStat', s.id, (res) => {
                 if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error;
             });
         });
 
-        row.append(label, value, btn);
+        // Botón "💵": compra un punto con dinero.
+        const buy = document.createElement('button');
+        buy.className = 'buy-btn';
+        buy.type = 'button';
+        buy.textContent = '💵 ' + gameConfig.statCost;
+        buy.title = `Comprar 1 punto de ${s.label}`;
+        buy.disabled = true;
+        buy.addEventListener('click', () => {
+            statsMsg.textContent = '';
+            socket.emit('buyStat', s.id, (res) => {
+                if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error;
+            });
+        });
+
+        row.append(info, value, plus, buy);
         statsList.appendChild(row);
-        statRows[s.id] = { value, btn };
+        statRows[s.id] = { value, effect, plus, buy };
     });
 }
 
@@ -337,7 +370,7 @@ function renderMissionButtons() {
         const title = document.createElement('strong');
         title.textContent = m.name;
         const info = document.createElement('span');
-        info.textContent = `⚡ ${m.energy} · ⏱ ${m.durationMs / 1000}s · 💵 ${m.reward} · ✨ ${m.xp} XP`;
+        info.textContent = `⚡ ${m.energy} · ⏱ ${m.durationMs / 1000}s · 💵 ${m.reward} · ✨ ${m.xp} XP · ⭐ +${m.fame}`;
         btn.append(title, info);
 
         // Al hacer clic, le pedimos al servidor empezar esa misión.
@@ -369,15 +402,284 @@ socket.on('missions', (list) => {
     renderMissionButtons();
 });
 
-// Aviso de misión terminada: dinero, XP y, si corresponde, subida de nivel.
-socket.on('missionDone', ({ name, reward, xp, levelsGained, level }) => {
-    let msg = `✅ Misión completada: ${name}. Ganaste 💵 ${reward}, ✨ ${xp} XP y ⭐ 1 de fama.`;
+// Aviso de misión terminada: dinero, XP, fama y, si corresponde, subida de nivel.
+socket.on('missionDone', ({ name, reward, xp, fame, levelsGained, level }) => {
+    let msg = `✅ Misión completada: ${name}. Ganaste 💵 ${reward}, ✨ ${xp} XP y ⭐ ${fame} de fama.`;
     if (levelsGained > 0) {
-        const pts = levelsGained * (clanConfig ? clanConfig.pointsPerLevel : 5);
+        const pts = levelsGained * (gameConfig ? gameConfig.pointsPerLevel : 5);
         msg += ` 🎉 ¡Subiste al nivel ${level}! Tenés +${pts} puntos para repartir en Inventario.`;
     }
     missionMsg.textContent = msg;
 });
+
+// ============================================================
+// GUERRA
+// Dos tarjetas (vos y tu rival). El servidor manda cada golpe
+// en vivo (evento "warEvent") y acá lo animamos.
+// ============================================================
+const arena = document.getElementById('arena');
+const warInfo = document.getElementById('warInfo');
+const searchRivalBtn = document.getElementById('searchRivalBtn');
+const fightBtn = document.getElementById('fightBtn');
+const warBanner = document.getElementById('warBanner');
+const warMsg = document.getElementById('warMsg');
+const warLog = document.getElementById('warLog');
+
+// Junta las partes de una tarjeta para poder actualizarlas fácil.
+function fighterParts(id) {
+    const root = document.getElementById(id);
+    return {
+        root,
+        avatar: root.querySelector('.f-avatar'),
+        name: root.querySelector('.f-name'),
+        sub: root.querySelector('.f-sub'),
+        hpFill: root.querySelector('.f-hp-fill'),
+        hpText: root.querySelector('.f-hp-text'),
+        stats: root.querySelector('.f-stats')
+    };
+}
+const fMe = fighterParts('fighterMe');
+const fRival = fighterParts('fighterRival');
+const sides = { me: fMe, rival: fRival }; // para elegir tarjeta por nombre ('me' o 'rival').
+
+// Estado de la guerra en esta pantalla:
+// 'idle' = sin rival, 'found' = rival encontrado, 'fighting' = peleando.
+let warState = 'idle';
+let showingResult = false;           // true después de una pelea, hasta la próxima búsqueda.
+let rivalInfo = null;                // datos del rival actual.
+let fightMax = { me: 0, rival: 0 };  // vida máxima de cada uno en la pelea actual.
+let bannerTimer = null;
+
+// Reinicia una animación CSS: saca la clase, fuerza al navegador a "olvidarla" y la vuelve a poner.
+function playAnim(el, cls, ms) {
+    el.classList.remove(cls);
+    void el.offsetWidth; // truco para reiniciar la animación.
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), ms);
+}
+
+// Dibuja la lista compacta de estadísticas dentro de una tarjeta.
+function fillStats(box, stats) {
+    box.innerHTML = '';
+    statsConfig.forEach((c) => {
+        const span = document.createElement('span');
+        span.textContent = `${c.icon} ${stats[c.id]}`;
+        span.title = c.label;
+        box.appendChild(span);
+    });
+}
+
+// Pone la barra de vida de un lado ('me' o 'rival'). Cambia de color según lo que queda.
+function setHp(side, hp, maxHp) {
+    const f = sides[side];
+    const ratio = Math.max(0, Math.min(1, hp / maxHp));
+    f.hpFill.style.width = (ratio * 100) + '%';
+    f.hpFill.classList.toggle('mid', ratio <= 0.5 && ratio > 0.25);
+    f.hpFill.classList.toggle('low', ratio <= 0.25);
+    f.hpText.textContent = `${Math.round(hp)}/${maxHp}`;
+}
+
+// Muestra un número que flota sobre la tarjeta ('-12', '¡Esquivó!', etc.).
+function floatNumber(side, text, cls) {
+    const el = document.createElement('div');
+    el.className = 'float-num ' + cls;
+    el.textContent = text;
+    sides[side].root.appendChild(el);
+    setTimeout(() => el.remove(), 1200);
+}
+
+// Agrega una línea al registro del combate (lo más nuevo arriba).
+function addWarLog(text, cls) {
+    const line = document.createElement('div');
+    line.className = cls || '';
+    line.textContent = text;
+    warLog.prepend(line);
+    while (warLog.children.length > 40) warLog.removeChild(warLog.lastChild);
+}
+
+// Muestra el cartel de estado. Si autoHideMs > 0, se oculta solo.
+function showBanner(text, cls = '', autoHideMs = 0) {
+    clearTimeout(bannerTimer);
+    warBanner.textContent = text;
+    warBanner.className = cls;
+    warBanner.hidden = false;
+    if (autoHideMs) bannerTimer = setTimeout(() => { warBanner.hidden = true; }, autoHideMs);
+}
+
+// Saca los efectos de ganador/perdedor de las tarjetas.
+function clearWarFx() {
+    fMe.root.classList.remove('winner', 'loser');
+    fRival.root.classList.remove('winner', 'loser');
+}
+
+// Tu tarjeta: nombre, clase, nivel y estadísticas (la vida solo se reinicia si no hay pelea).
+function renderMyCard() {
+    if (!lastState) return;
+    fMe.avatar.textContent = (myName || '?').charAt(0).toUpperCase();
+    fMe.name.textContent = myName || '---';
+    fMe.sub.textContent = `${lastState.className} · Nv ${lastState.level}`;
+    fillStats(fMe.stats, lastState.stats);
+    if (warState !== 'fighting' && !showingResult) setHp('me', lastState.maxHp, lastState.maxHp);
+}
+
+// Tarjeta del rival encontrado.
+function renderRivalCard(r) {
+    rivalInfo = r;
+    fRival.root.classList.remove('empty');
+    fRival.avatar.textContent = r.name.charAt(0).toUpperCase();
+    fRival.name.textContent = r.name;
+    fRival.sub.textContent = `${r.className} · Nv ${r.level}`;
+    fillStats(fRival.stats, r.stats);
+    setHp('rival', r.maxHp, r.maxHp);
+}
+
+// Tarjeta del rival vacía (cuando todavía no buscaste a nadie).
+function clearRival() {
+    rivalInfo = null;
+    fRival.root.classList.add('empty');
+    fRival.avatar.textContent = '?';
+    fRival.name.textContent = 'Sin rival';
+    fRival.sub.textContent = 'Buscá un oponente';
+    fRival.stats.innerHTML = '';
+    fRival.hpFill.style.width = '0%';
+    fRival.hpFill.classList.remove('mid', 'low');
+    fRival.hpText.textContent = '-';
+}
+
+// Muestra u oculta los botones según el estado de la guerra.
+function updateWarButtons() {
+    searchRivalBtn.hidden = warState === 'fighting';
+    fightBtn.hidden = warState !== 'found';
+    if (warState === 'found' && gameConfig) {
+        const cost = gameConfig.warEnergy;
+        const enough = lastState && lastState.energy >= cost;
+        fightBtn.disabled = !enough;
+        fightBtn.textContent = enough ? `⚔️ Pelear (-${cost} ⚡)` : `⚔️ Pelear (necesitás ${cost} ⚡)`;
+    }
+}
+
+// Vuelve la guerra a cero (al iniciar sesión o reconectar).
+function resetWar() {
+    warState = 'idle';
+    showingResult = false;
+    clearWarFx();
+    clearRival();
+    warLog.innerHTML = '';
+    warBanner.hidden = true;
+    warMsg.textContent = '';
+    if (lastState) setHp('me', lastState.maxHp, lastState.maxHp);
+    updateWarButtons();
+}
+
+// ----- Buscar rival -----
+searchRivalBtn.addEventListener('click', () => {
+    warMsg.textContent = '';
+    searchRivalBtn.disabled = true;
+    socket.emit('searchRival', (res) => {
+        searchRivalBtn.disabled = false;
+        if (!res.ok) { warMsg.textContent = '⚠️ ' + res.error; return; }
+
+        // Rival encontrado: limpiamos lo de la pelea anterior y mostramos su tarjeta.
+        warState = 'found';
+        showingResult = false;
+        clearWarFx();
+        warBanner.hidden = true;
+        warLog.innerHTML = '';
+        renderRivalCard(res.rival);
+        renderMyCard();           // reinicia tu barra de vida.
+        updateWarButtons();
+    });
+});
+
+// ----- Pelear -----
+fightBtn.addEventListener('click', () => {
+    warMsg.textContent = '';
+    fightBtn.disabled = true;
+    socket.emit('startFight', (res) => {
+        if (!res.ok) { warMsg.textContent = '⚠️ ' + res.error; updateWarButtons(); return; }
+
+        // La pelea arrancó: las barras empiezan llenas y esperamos los golpes del servidor.
+        warState = 'fighting';
+        showingResult = false;
+        fightMax = { me: res.maxHpMe, rival: res.maxHpRival };
+        setHp('me', fightMax.me, fightMax.me);
+        setHp('rival', fightMax.rival, fightMax.rival);
+        warLog.innerHTML = '';
+        addWarLog('¡Comienza el combate!', 'l-sys');
+        showBanner('⚔️ ¡Comienza el combate!', '', 1200);
+        updateWarButtons();
+    });
+});
+
+// ----- Cada golpe que manda el servidor -----
+socket.on('warEvent', (ev) => {
+    if (warState !== 'fighting') return;
+
+    const targetSide = ev.actor === 'me' ? 'rival' : 'me';
+    const actor = sides[ev.actor];
+    const target = sides[targetSide];
+    const rivalName = rivalInfo ? rivalInfo.name : 'El rival';
+
+    // 1) El que ataca brilla y se lanza hacia adelante.
+    playAnim(actor.root, 'acting', 900);
+    if (ev.extra) showBanner('⚡ ¡Turno extra!', 'extra', 1000);
+
+    // 2) Un instante después se ve el efecto en el que recibe.
+    setTimeout(() => {
+        if (ev.result === 'dodge') {
+            playAnim(target.root, 'dodge', 600);
+            floatNumber(targetSide, '¡Esquivó!', 'dodge');
+        } else if (ev.result === 'crit') {
+            playAnim(target.root, 'crit-hit', 650);
+            playAnim(arena, 'flash', 500);
+            floatNumber(targetSide, '💥 -' + ev.dmg, 'crit');
+        } else {
+            playAnim(target.root, 'hit', 550);
+            floatNumber(targetSide, '-' + ev.dmg, 'dmg');
+        }
+        // Las barras de vida bajan de a poco (la animación está en el CSS).
+        setHp('me', ev.hpMe, fightMax.me);
+        setHp('rival', ev.hpRival, fightMax.rival);
+    }, 450);
+
+    // 3) Registro escrito del golpe.
+    const prefix = ev.extra ? '⚡ Turno extra: ' : '';
+    let text;
+    if (ev.actor === 'me') {
+        text = ev.result === 'dodge' ? `${rivalName} esquivó tu ataque.`
+             : ev.result === 'crit' ? `💥 ¡CRÍTICO! Golpeaste a ${rivalName} por ${ev.dmg}.`
+             : `Golpeaste a ${rivalName} por ${ev.dmg}.`;
+    } else {
+        text = ev.result === 'dodge' ? `¡Esquivaste el ataque de ${rivalName}!`
+             : ev.result === 'crit' ? `💥 ¡CRÍTICO! ${rivalName} te golpeó por ${ev.dmg}.`
+             : `${rivalName} te golpeó por ${ev.dmg}.`;
+    }
+    addWarLog(prefix + text, (ev.actor === 'me' ? 'l-me' : 'l-rival') + (ev.result === 'crit' ? ' l-crit' : ''));
+});
+
+// ----- Fin de la pelea -----
+socket.on('warEnd', ({ result, reward, rivalName }) => {
+    warState = 'idle';
+    showingResult = true; // dejamos las barras como quedaron.
+
+    if (result === 'win') {
+        showBanner(`🏆 ¡VICTORIA! Ganaste 💵 ${reward}`, 'win');
+        fMe.root.classList.add('winner');
+        fRival.root.classList.add('loser');
+        addWarLog(`🏆 Venciste a ${rivalName} y ganaste 💵 ${reward}.`, 'l-me l-crit');
+    } else if (result === 'lose') {
+        showBanner('💀 Derrota...', 'lose');
+        fRival.root.classList.add('winner');
+        fMe.root.classList.add('loser');
+        addWarLog(`💀 ${rivalName} te venció.`, 'l-rival l-crit');
+    } else {
+        showBanner('🤝 Empate', '');
+        addWarLog('🤝 La pelea terminó en empate.', 'l-sys');
+    }
+    updateWarButtons();
+});
+
+clearRival(); // al cargar la página, el rival aparece vacío.
 
 // ============================================================
 // CHAT (funciones compartidas por el chat global y el chat de clan)
@@ -440,8 +742,7 @@ chatForm.addEventListener('submit', (e) => {
 });
 
 // Cada minuto sacamos de la pantalla los mensajes que ya pasaron los 30 minutos,
-// igual que hace la base de datos. (Usa la hora de tu dispositivo: si tu reloj
-// estuviera muy mal, podrías ver mensajes desaparecer antes o después.)
+// igual que hace la base de datos.
 setInterval(() => {
     const limit = Date.now() - chatTtlMs;
     chatLog.querySelectorAll('.msg').forEach((el) => {
@@ -468,7 +769,7 @@ const joinClanReq = document.getElementById('joinClanReq');
 const clanJoinList = document.getElementById('clanJoinList');
 const clanMsg = document.getElementById('clanMsg');
 
-// Icono y nombre de cada rango. El líder lleva el sombrero 🎩 (cambialo por 🧢 si preferís gorra).
+// Icono y nombre de cada rango. El líder lleva el sombrero 🎩.
 const ROLE_ICONS = { lider: '🎩', oficial: '⭐', miembro: '👤' };
 const ROLE_LABELS = { lider: 'Líder', oficial: 'Oficial', miembro: 'Miembro' };
 
@@ -487,14 +788,14 @@ function loadMyClan() {
 
 // Activa o desactiva los botones según mi nivel (se llama cada segundo, es liviano).
 function updateClanButtons() {
-    if (!lastState || !clanConfig) return;
-    const canCreate = lastState.level >= clanConfig.clanCreateLevel;
-    const canJoin = lastState.level >= clanConfig.clanJoinLevel;
+    if (!lastState || !gameConfig) return;
+    const canCreate = lastState.level >= gameConfig.clanCreateLevel;
+    const canJoin = lastState.level >= gameConfig.clanJoinLevel;
     createClanBtn.disabled = !canCreate;
     createClanReq.textContent =
-        `Requiere nivel ${clanConfig.clanCreateLevel}. ${canCreate ? '✅ Cumplís el requisito.' : '🔒 Todavía no llegás.'}`;
+        `Requiere nivel ${gameConfig.clanCreateLevel}. ${canCreate ? '✅ Cumplís el requisito.' : '🔒 Todavía no llegás.'}`;
     joinClanReq.textContent =
-        `Requiere nivel ${clanConfig.clanJoinLevel} para unirse. ${canJoin ? '✅ Cumplís el requisito.' : '🔒 Todavía no llegás.'}`;
+        `Requiere nivel ${gameConfig.clanJoinLevel} para unirse. ${canJoin ? '✅ Cumplís el requisito.' : '🔒 Todavía no llegás.'}`;
     document.querySelectorAll('.join-btn').forEach((b) => { b.disabled = !canJoin; });
 }
 
@@ -713,11 +1014,15 @@ socket.on('clanNotice', (text) => {
 
 // Configuración del juego (llega al iniciar sesión, antes del estado).
 socket.on('config', (cfg) => {
-    clanConfig = cfg;
+    gameConfig = cfg;
+    statsConfig = cfg.stats;
     if (cfg.chatTtlMs) chatTtlMs = cfg.chatTtlMs;
     buildStatsPanel(cfg.stats);
+    warInfo.textContent =
+        `Buscá un rival al azar entre los jugadores (gratis). Pelear cuesta ⚡ ${cfg.warEnergy} y, si ganás, recibís 💵 ${cfg.warReward}.`;
+    resetWar();           // si había una pelea a medias antes de reconectar, la limpiamos.
     updateClanButtons();
-    loadClanChat(); // también al reconectar, para no perder mensajes del clan.
+    loadClanChat();       // también al reconectar, para no perder mensajes del clan.
 });
 
 // Dibuja el estado personal que mandó el servidor.
@@ -741,11 +1046,15 @@ function renderState(s) {
         ? `(+1 en ${Math.ceil(s.nextEnergyMs / 1000)}s)`
         : '(llena)';
 
-    // Estadísticas: valores, puntos disponibles y botones "+".
+    // Estadísticas: valores, efectos, puntos disponibles y botones.
     statPointsValue.textContent = s.statPoints;
+    const canBuy = !!gameConfig && s.money >= gameConfig.statCost;
     Object.keys(statRows).forEach((id) => {
-        statRows[id].value.textContent = s.stats[id];
-        statRows[id].btn.disabled = s.statPoints < 1;
+        const r = statRows[id];
+        r.value.textContent = s.stats[id];
+        r.effect.textContent = s.effects[id];
+        r.plus.disabled = s.statPoints < 1;   // "+" necesita puntos de nivel.
+        r.buy.disabled = !canBuy;             // "💵" necesita dinero.
     });
     // Globito rojo en el botón Inventario si hay puntos sin gastar.
     inventoryBadge.hidden = s.statPoints < 1;
@@ -764,6 +1073,8 @@ function renderState(s) {
 
     updateMissionButtons();
     updateClanButtons();
+    renderMyCard();        // tarjeta de Guerra con tus datos actuales.
+    updateWarButtons();    // habilita o no el botón de pelear según tu energía.
 
     // Si cambió mi clan (entré, salí, me expulsaron o recién cargó), pedimos los datos del clan y su chat.
     if (s.clan !== lastClanName) {
