@@ -512,3 +512,229 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
 @media (max-width: 500px) {
     #clanChatLog { height: 200px; font-size: 14px; }
 }
+
+/* ============================================================
+   ESTADÍSTICAS: ahora con texto de efecto y botón de compra
+   (esta regla pisa la anterior de .stat-row, por eso va al final)
+   ============================================================ */
+.stat-row { grid-template-columns: 1fr auto auto auto; }
+.stat-info { display: flex; flex-direction: column; min-width: 0; }
+.stat-effect { font-size: 12px; color: var(--muted); }
+.buy-btn {
+    height: 32px;
+    padding: 0 8px;
+    font-size: 13px;
+    white-space: nowrap;
+    color: white;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.buy-btn:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; opacity: 0.5; }
+
+/* ============================================================
+   GUERRA
+   ============================================================ */
+
+/* Arena: tarjeta | VS | tarjeta */
+#arena {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+    align-items: stretch;
+    padding: 14px 10px;
+    margin-bottom: 12px;
+    background: radial-gradient(circle at center, #2a303b 0%, var(--bg) 85%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+.vs {
+    align-self: center;
+    font-size: 22px;
+    font-weight: bold;
+    color: var(--accent);
+    text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+}
+
+/* Tarjeta de cada luchador */
+.fighter {
+    position: relative;               /* para ubicar los números flotantes */
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    background: var(--panel);
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 0.3s, box-shadow 0.3s, opacity 0.4s, filter 0.4s;
+}
+.fighter.empty { opacity: 0.6; }
+.f-avatar {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+}
+.f-name { font-weight: bold; font-size: 16px; text-align: center; word-break: break-word; }
+.f-sub { min-height: 15px; font-size: 12px; color: var(--muted); text-align: center; }
+
+/* Barra de vida: baja de a poco y cambia de color */
+.f-hp {
+    width: 100%;
+    height: 16px;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.f-hp-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--green);                         /* verde: vida alta */
+    transition: width 0.8s ease-out, background 0.4s;
+}
+.f-hp-fill.mid { background: var(--accent); }         /* naranja: vida media */
+.f-hp-fill.low { background: #ef4444; }               /* rojo: poca vida */
+.f-hp-text { font-size: 13px; font-weight: bold; }
+
+/* Lista compacta de estadísticas dentro de la tarjeta */
+.f-stats {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px 8px;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+/* ----- Animaciones de combate ----- */
+
+/* El que ataca brilla y se lanza hacia el rival */
+.fighter.acting { border-color: var(--accent); box-shadow: 0 0 22px rgba(245, 158, 11, 0.75); z-index: 2; }
+#fighterMe.acting { animation: lungeRight 0.6s ease-in-out; }
+#fighterRival.acting { animation: lungeLeft 0.6s ease-in-out; }
+@keyframes lungeRight {
+    0%, 100% { transform: translateX(0) scale(1); }
+    35% { transform: translateX(18px) scale(1.06); }
+}
+@keyframes lungeLeft {
+    0%, 100% { transform: translateX(0) scale(1); }
+    35% { transform: translateX(-18px) scale(1.06); }
+}
+
+/* El que recibe el golpe tiembla y se pone rojo */
+.fighter.hit { animation: shake 0.5s; border-color: #ef4444; box-shadow: 0 0 20px rgba(239, 68, 68, 0.85); }
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-8px); }
+    40% { transform: translateX(8px); }
+    60% { transform: translateX(-5px); }
+    80% { transform: translateX(5px); }
+}
+
+/* Crítico: temblor más fuerte y brillo dorado */
+.fighter.crit-hit { animation: shakeHard 0.6s; border-color: #fde047; box-shadow: 0 0 30px rgba(250, 204, 21, 0.95); }
+@keyframes shakeHard {
+    0%, 100% { transform: translateX(0) rotate(0); }
+    15% { transform: translateX(-12px) rotate(-3deg); }
+    30% { transform: translateX(12px) rotate(3deg); }
+    45% { transform: translateX(-9px) rotate(-2deg); }
+    60% { transform: translateX(9px) rotate(2deg); }
+    80% { transform: translateX(-4px); }
+}
+
+/* Esquiva: salta hacia arriba y se desdibuja */
+.fighter.dodge { animation: dodge 0.6s; }
+@keyframes dodge {
+    0%, 100% { transform: translateY(0) scale(1); opacity: 1; }
+    40% { transform: translateY(-14px) scale(0.94); opacity: 0.4; }
+}
+
+/* Destello de toda la arena en un crítico */
+#arena.flash { animation: arenaFlash 0.5s; }
+@keyframes arenaFlash {
+    0% { box-shadow: inset 0 0 0 rgba(250, 204, 21, 0); }
+    30% { box-shadow: inset 0 0 70px rgba(250, 204, 21, 0.55); }
+    100% { box-shadow: inset 0 0 0 rgba(250, 204, 21, 0); }
+}
+
+/* Números que flotan hacia arriba (daño, crítico, esquiva) */
+.float-num {
+    position: absolute;
+    left: 50%;
+    top: 28%;
+    z-index: 5;
+    font-size: 26px;
+    font-weight: bold;
+    text-shadow: 0 2px 6px #000;
+    pointer-events: none;
+    animation: floatUp 1.1s ease-out forwards;
+}
+.float-num.dmg { color: #f87171; }
+.float-num.crit { color: #fde047; font-size: 36px; }
+.float-num.dodge { color: #7dd3fc; font-size: 20px; }
+@keyframes floatUp {
+    0% { opacity: 0; transform: translate(-50%, 10px) scale(0.6); }
+    20% { opacity: 1; transform: translate(-50%, -6px) scale(1.2); }
+    100% { opacity: 0; transform: translate(-50%, -64px) scale(1); }
+}
+
+/* Ganador brilla y late; perdedor se apaga */
+.fighter.winner { border-color: #fde047; box-shadow: 0 0 28px rgba(250, 204, 21, 0.85); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { transform: scale(1.04); } }
+.fighter.loser { filter: grayscale(1); opacity: 0.55; }
+
+/* Cartel de estado de la pelea */
+#warBanner {
+    margin-bottom: 12px;
+    padding: 10px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+#warBanner.win { color: #fde047; border-color: #fde047; }
+#warBanner.lose { color: #f87171; border-color: #f87171; }
+#warBanner.extra { color: var(--accent); border-color: var(--accent); }
+
+#warActions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Registro del combate (lo más nuevo arriba) */
+#warLog {
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+#warLog div { padding: 3px 0; border-bottom: 1px dashed var(--border); }
+#warLog div:last-child { border-bottom: none; }
+#warLog .l-me { color: #86efac; }
+#warLog .l-rival { color: #fca5a5; }
+#warLog .l-sys { color: var(--muted); }
+#warLog .l-crit { font-weight: bold; }
+
+@media (max-width: 500px) {
+    #arena { padding: 10px 6px; gap: 4px; }
+    .f-avatar { width: 48px; height: 48px; font-size: 22px; }
+    .f-name { font-size: 14px; }
+    .f-stats { font-size: 11px; }
+    .vs { font-size: 16px; }
+    .float-num { font-size: 20px; }
+    .float-num.crit { font-size: 28px; }
+    #fighterMe.acting, #fighterRival.acting { animation-duration: 0.5s; }
+}
