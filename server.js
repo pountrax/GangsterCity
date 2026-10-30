@@ -1,6 +1,7 @@
 // ============================================================
-// server.js — Servidor del juego (v6: guerra por turnos, daño,
-// compra de estadísticas con dinero y fama por misión)
+// server.js — Servidor del juego (v7: emparejamiento por nivel,
+// cargas de búsqueda, premio según nivel, cambio de nombres,
+// rango de Colíder y reglas del clan)
 // El servidor es el ÚNICO que decide niveles, dinero, energía,
 // estadísticas, clanes y peleas. El navegador solo pide acciones
 // y muestra el resultado.
@@ -8,7 +9,7 @@
 
 const express = require('express');          // servidor web (rutas HTTP).
 const http = require('http');                // servidor HTTP base (Socket.IO se engancha acá).
-const crypto = require('crypto');            // para hashear contraseñas.
+const crypto = require('crypto');            // para hashear contraseñas y crear IDs.
 const socketIo = require('socket.io');       // comunicación en tiempo real.
 const { MongoClient } = require('mongodb');  // cliente de la base de datos.
 
@@ -18,7 +19,7 @@ const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
 // Ruta de prueba: sirve para verificar qué versión corre en Render.
-app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v6 guerra'));
+app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v7 familia, rangos y busquedas'));
 
 // La URL de MongoDB está en las variables de entorno de Render (nunca en el código).
 const client = new MongoClient(process.env.MONGODB_URI);
@@ -39,7 +40,18 @@ const STAT_COST = 1500;          // dinero que cuesta comprar 1 punto de estadí
 const CLAN_JOIN_LEVEL = 5;       // nivel mínimo para unirse a un clan.
 const CLAN_CREATE_LEVEL = 10;    // nivel mínimo para crear un clan.
 const CLAN_MAX_MEMBERS = 30;     // máximo de miembros por clan.
-const CLAN_ROLES = ['miembro', 'oficial']; // rangos que el líder puede asignar.
+const CLAN_RULES_MAX = 1000;     // máximo de caracteres de las reglas del clan.
+
+// Rangos del clan, de menor a mayor. El "lider" no se guarda en el jugador:
+// se sabe porque su ID está en el campo "owner" del clan.
+const ROLE_RANK = { miembro: 0, oficial: 1, colider: 2, lider: 3 };
+const MANAGER_ROLES = ['lider', 'colider']; // rangos que pueden expulsar y editar las reglas.
+
+// Cambio de nombre (de usuario y de clan): tiempo de espera entre un cambio y otro.
+const NAME_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutos.
+// Nombres válidos: 3 a 20 caracteres entre letras, números, espacios, guion bajo, guion y punto.
+const NAME_REGEX = /^[\p{L}\p{N} _.-]{3,20}$/u;
+const NAME_ERROR = 'Nombre inválido: usá entre 3 y 20 letras, números, espacios, guiones o puntos.';
 
 // Cuánto viven los mensajes antes de que MongoDB los borre solo.
 const CHAT_TTL_SECONDS = 30 * 60;               // chat global: 30 minutos.
@@ -47,21 +59,42 @@ const CLAN_CHAT_TTL_SECONDS = 7 * 24 * 60 * 60; // chat de clan: 7 días.
 
 // ---------- Guerra ----------
 const WAR_ENERGY = 15;       // energía que cuesta pelear.
-const WAR_REWARD = 300;      // dinero que se gana al vencer.
+const WAR_REWARD = 300;      // dinero base al vencer (se ajusta según la diferencia de nivel).
 const WAR_TURN_MS = 1400;    // cada cuánto se muestra un golpe (milisegundos).
 const WAR_MAX_ACTIONS = 60;  // tope de golpes por pelea (evita peleas eternas).
 const HP_PER_VIDA = 5;       // cada punto de Vida da 5 HP en combate.
 const CRIT_MULT = 2;         // un crítico pega el doble.
+
+// Búsqueda de rival: cargas.
+const SEARCH_MAX = 3;                         // cargas de búsqueda.
+const SEARCH_RECHARGE_MS = 10 * 60 * 1000;    // al gastar la última, se recargan todas tras 10 minutos.
+
+// Emparejamiento: se busca primero a ±5 niveles; si no hay nadie, se amplía el rango.
+// El último valor (Infinity) significa "cualquier nivel".
+// Si no querés que se amplíe nunca, dejá solo [5].
+const MATCH_RANGES = [5, 10, 25, Infinity];
+
+// Premio según la diferencia de nivel: ±10% por cada nivel de diferencia,
+// con un mínimo de 30% y un máximo de 200% del premio base.
+const REWARD_PER_LEVEL = 0.1;
+const REWARD_MIN_MULT = 0.3;
+const REWARD_MAX_MULT = 2;
+
+// Los porcentajes de combate dependen del nivel: cuanto más nivel tenés, más puntos
+// hacen falta para el mismo porcentaje. En nivel 1 es la fórmula de siempre.
+const PCT_BASE = 100;
+const PCT_PER_LEVEL = 4;
+
 // Topes de los porcentajes (para que ninguna estadística haga invencible a nadie).
 const ARMOR_CAP = 0.75;      // aguante: máximo 75% menos de daño.
 const EXTRA_TURN_CAP = 0.5;  // velocidad: máximo 50% de turno extra.
 const DODGE_CAP = 0.5;       // inteligencia: máximo 50% de esquivar.
 const CRIT_CAP = 0.6;        // suerte: máximo 60% de crítico.
 
-// Convierte una estadística en un porcentaje (0 a 1) con rendimientos decrecientes:
-// 25 → 20%, 50 → 33%, 100 → 50%, 200 → 67%... y nunca pasa del tope "cap".
-function pct(stat, cap) {
-    return Math.min(cap, stat / (stat + 100));
+// Convierte una estadística en un porcentaje (0 a 1) con rendimientos decrecientes,
+// teniendo en cuenta el NIVEL del personaje. Nunca pasa del tope "cap".
+function pct(stat, cap, level) {
+    return Math.min(cap, stat / (stat + PCT_BASE + (level - 1) * PCT_PER_LEVEL));
 }
 
 // Estadísticas del personaje (el "id" es el nombre interno, el "label" el que se ve).
@@ -76,7 +109,6 @@ const STATS = [
 const STAT_IDS = STATS.map(s => s.id); // lista de IDs válidos (para validar lo que manda el cliente).
 
 // Clases de personaje: cada una define sus estadísticas iniciales.
-// (El daño es 15 para todas por ahora; se puede cambiar por clase.)
 const CLASSES = {
     maton:     { name: 'Matón',     stats: { vida: 20, dano: 15, aguante: 25, velocidad: 13, inteligencia: 11, suerte: 15 } },
     estafador: { name: 'Estafador', stats: { vida: 14, dano: 15, aguante: 12, velocidad: 18, inteligencia: 24, suerte: 16 } },
@@ -102,7 +134,8 @@ const MISSIONS = [
 // Jugadores conectados AHORA. Formato:
 // { socketId: { key, name, score, lastMsg, lastClanMsg, money, energy, energyAt, mission,
 //               level, xp, fame, statPoints, stats, cls, clanId, clanName, clanRole, busy,
-//               rival, fight, searching, lastSearch } }
+//               rival, fight, searching, lastSearch, searchCharges, searchRechargeAt, nameChangedAt } }
+// "key" es el ID interno FIJO del usuario en la base (no cambia aunque cambie su nombre).
 const online = {};
 
 // Cachés leídos de la base cada 10 segundos (incluyen jugadores desconectados):
@@ -117,6 +150,31 @@ let clanCache = [];     // ranking de clanes.
 // Convierte contraseña + salt en un hash ilegible (scrypt es lento a propósito).
 function hashPassword(password, salt) {
     return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+
+// Convierte milisegundos en un texto corto: "9 min 30 s" o "45 s".
+function fmtWait(ms) {
+    const total = Math.max(1, Math.ceil(ms / 1000));
+    const m = Math.floor(total / 60);
+    return m > 0 ? `${m} min ${total % 60} s` : `${total} s`;
+}
+
+// Limpia y valida un nombre (de usuario o de clan). Devuelve el nombre limpio o null si no sirve.
+function cleanName(raw) {
+    // Sacamos espacios de los costados y dobles espacios, cortamos a 20 y volvemos a recortar.
+    const name = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 20).trim();
+    return NAME_REGEX.test(name) ? name : null;
+}
+
+// Busca un usuario por su nombre (en minúsculas = "nameKey").
+// Los usuarios viejos todavía sin nameKey se encuentran por su _id (que era el nombre en minúsculas).
+function findUserByNameKey(nameKey) {
+    return users.findOne({ $or: [{ nameKey }, { nameKey: { $exists: false }, _id: nameKey }] });
+}
+
+// Igual, pero para clanes.
+function findClanByNameKey(nameKey) {
+    return clans.findOne({ $or: [{ nameKey }, { nameKey: { $exists: false }, _id: nameKey }] });
 }
 
 // XP necesaria para pasar del nivel "level" al siguiente.
@@ -140,7 +198,7 @@ function addXp(p, amount) {
 }
 
 // Completa las estadísticas de un documento de la base.
-// Los usuarios viejos no tienen las nuevas (como "dano"): se les pone el valor base de su clase.
+// Los usuarios viejos no tienen las nuevas: se les pone el valor base de su clase.
 function resolveStats(user) {
     const cls = CLASSES[user.class] ? user.class : DEFAULT_CLASS;
     const base = CLASSES[cls].stats;
@@ -165,29 +223,32 @@ function buildPlayer(key, user, now) {
         stats, cls,
         clanId: user.clanId ?? null,
         clanName: null,                          // se completa al iniciar sesión.
-        clanRole: user.clanRole ?? 'miembro',    // 'miembro' u 'oficial' (el líder se sabe por clan.owner).
-        busy: false,                             // evita que dos acciones de clan se ejecuten a la vez.
+        clanRole: user.clanRole ?? 'miembro',    // 'miembro', 'oficial' o 'colider' (el líder se sabe por clan.owner).
+        busy: false,                             // evita que dos acciones de clan/nombre se ejecuten a la vez.
         rival: null,                             // rival encontrado en Guerra (todavía sin pelear).
         fight: null,                             // pelea en curso (null si no está peleando).
         searching: false,                        // true mientras se busca rival.
-        lastSearch: 0                            // hora de la última búsqueda (límite de velocidad).
+        lastSearch: 0,                           // hora de la última búsqueda (límite de velocidad).
+        searchCharges: Math.max(0, Math.min(SEARCH_MAX, user.searchCharges ?? SEARCH_MAX)), // cargas de búsqueda.
+        searchRechargeAt: user.searchRechargeAt ?? 0,  // hora en que vuelven las cargas (0 = no hay espera).
+        nameChangedAt: user.nameChangedAt ?? 0         // hora del último cambio de nombre.
     };
 }
 
-// Texto que explica qué hace cada estadística con su valor actual (se muestra en Inventario).
-function describeStats(s) {
+// Texto que explica qué hace cada estadística con su valor y nivel actuales (se muestra en Inventario).
+function describeStats(s, level) {
     const pc = (v) => Math.round(v * 100);
     return {
         vida: `${s.vida * HP_PER_VIDA} HP en combate`,
         dano: `${s.dano} de daño por golpe`,
-        aguante: `Reduce ${pc(pct(s.aguante, ARMOR_CAP))}% el daño recibido`,
-        velocidad: `${pc(pct(s.velocidad, EXTRA_TURN_CAP))}% de turno extra`,
-        inteligencia: `${pc(pct(s.inteligencia, DODGE_CAP))}% de esquivar`,
-        suerte: `${pc(pct(s.suerte, CRIT_CAP))}% de crítico`
+        aguante: `Reduce ${pc(pct(s.aguante, ARMOR_CAP, level))}% el daño recibido`,
+        velocidad: `${pc(pct(s.velocidad, EXTRA_TURN_CAP, level))}% de turno extra`,
+        inteligencia: `${pc(pct(s.inteligencia, DODGE_CAP, level))}% de esquivar`,
+        suerte: `${pc(pct(s.suerte, CRIT_CAP, level))}% de crítico`
     };
 }
 
-// Busca a un jugador CONECTADO por su key (nombre en minúsculas).
+// Busca a un jugador CONECTADO por su key (ID interno).
 function findOnlineByKey(key) {
     const entry = Object.entries(online).find(([, p]) => p.key === key);
     return entry ? { id: entry[0], p: entry[1] } : null;
@@ -200,16 +261,84 @@ function emitToClan(clanId, event, data) {
     });
 }
 
-// Devuelve el clan del jugador SOLO si él es el líder; si no, null.
-async function getClanIfLeader(p) {
+// Devuelve { clan, role } con el clan del jugador y su rango REAL, o null si no tiene clan.
+// El rango se verifica contra la base (el líder es quien figura como "owner").
+async function getClanAndRole(p) {
     if (!p.clanId) return null;
     const clan = await clans.findOne({ _id: p.clanId });
-    return clan && clan.owner === p.key ? clan : null;
+    if (!clan) return null;
+    return { clan, role: clan.owner === p.key ? 'lider' : p.clanRole };
+}
+
+// ¿Puede alguien con el rango "actorRole" expulsar o cambiar el rango de alguien con "targetRole"?
+// - El líder puede con todos menos con otro líder.
+// - El colíder solo con Oficiales y Miembros.
+function canManage(actorRole, targetRole) {
+    if (actorRole === 'lider') return targetRole !== 'lider';
+    if (actorRole === 'colider') return targetRole === 'miembro' || targetRole === 'oficial';
+    return false;
+}
+
+// Busca a un miembro de un clan y devuelve su rango real y si está conectado.
+// Devuelve null si ese jugador no pertenece al clan.
+async function findClanMember(clan, key) {
+    const doc = await users.findOne({ _id: key, clanId: clan._id }, { projection: { clanRole: 1 } });
+    if (!doc) return null;
+    const live = findOnlineByKey(key);
+    const stored = live ? live.p.clanRole : doc.clanRole;
+    const role = clan.owner === key ? 'lider' : (ROLE_RANK[stored] !== undefined ? stored : 'miembro');
+    return { live, role };
 }
 
 // ============================================================
-// GUERRA: combate por turnos
+// GUERRA
 // ============================================================
+
+// Premio según la diferencia de nivel: contra alguien más alto, más; contra alguien más bajo, menos.
+function warReward(myLevel, rivalLevel) {
+    const mult = Math.max(REWARD_MIN_MULT, Math.min(REWARD_MAX_MULT, 1 + (rivalLevel - myLevel) * REWARD_PER_LEVEL));
+    return Math.round(WAR_REWARD * mult);
+}
+
+// BÚSQUEDAS: si pasó el tiempo de espera, vuelven las cargas.
+function refreshSearch(p, now) {
+    if (p.searchCharges > 0) return;
+    if (!p.searchRechargeAt) {
+        p.searchRechargeAt = now + SEARCH_RECHARGE_MS;   // (por si faltaba el reloj, lo arrancamos)
+    } else if (now >= p.searchRechargeAt) {
+        p.searchCharges = SEARCH_MAX;
+        p.searchRechargeAt = 0;
+    }
+}
+
+// Gasta una carga de búsqueda. Si era la última, arranca la espera de 10 minutos.
+function useSearch(p, now) {
+    p.searchCharges = Math.max(0, p.searchCharges - 1);
+    if (p.searchCharges === 0) p.searchRechargeAt = now + SEARCH_RECHARGE_MS;
+}
+
+// Busca un rival al azar cerca del nivel del jugador, ampliando el rango si no hay nadie.
+// Devuelve { doc, expanded } o null si no hay ningún otro jugador.
+async function findRival(p) {
+    for (let i = 0; i < MATCH_RANGES.length; i++) {
+        const range = MATCH_RANGES[i];
+        const match = { _id: { $ne: p.key } }; // nunca uno mismo.
+        if (Number.isFinite(range)) {
+            // Nivel entre (mío - rango) y (mío + rango). $ifNull: los usuarios sin nivel cuentan como nivel 1.
+            match.$expr = { $and: [
+                { $gte: [{ $ifNull: ['$level', 1] }, p.level - range] },
+                { $lte: [{ $ifNull: ['$level', 1] }, p.level + range] }
+            ] };
+        }
+        const found = await users.aggregate([
+            { $match: match },
+            { $sample: { size: 1 } },  // uno al azar entre los que cumplen.
+            { $project: { name: 1, level: 1, class: 1, stats: 1 } }
+        ]).toArray();
+        if (found.length) return { doc: found[0], expanded: i > 0 };
+    }
+    return null;
+}
 
 // Convierte las estadísticas de un personaje en un "luchador" con sus valores de combate.
 function makeFighter(name, level, cls, stats) {
@@ -223,20 +352,21 @@ function makeFighter(name, level, cls, stats) {
 }
 
 // Un golpe de "att" (atacante) contra "def" (defensor). Modifica la vida del defensor.
+// Los porcentajes de cada uno dependen de SU propio nivel.
 // Devuelve { result: 'hit' | 'crit' | 'dodge', dmg }.
 function resolveHit(att, def) {
     // 1) ¿El defensor esquiva? (inteligencia)
-    if (Math.random() < pct(def.inteligencia, DODGE_CAP)) return { result: 'dodge', dmg: 0 };
+    if (Math.random() < pct(def.inteligencia, DODGE_CAP, def.level)) return { result: 'dodge', dmg: 0 };
 
     // 2) Daño base con una variación de ±15%.
     let dmg = att.dano * (0.85 + Math.random() * 0.3);
 
     // 3) ¿Es crítico? (suerte del atacante)
-    const crit = Math.random() < pct(att.suerte, CRIT_CAP);
+    const crit = Math.random() < pct(att.suerte, CRIT_CAP, att.level);
     if (crit) dmg *= CRIT_MULT;
 
     // 4) El aguante del defensor reduce el daño.
-    dmg *= 1 - pct(def.aguante, ARMOR_CAP);
+    dmg *= 1 - pct(def.aguante, ARMOR_CAP, def.level);
 
     dmg = Math.max(1, Math.round(dmg)); // mínimo 1 de daño.
     def.hp = Math.max(0, def.hp - dmg);
@@ -267,7 +397,7 @@ function simulateFight(me, rival) {
         act(att, def, actor, false);
 
         // Turno extra (velocidad): una sola vez por turno, y solo si el rival sigue en pie.
-        if (def.hp > 0 && actions < WAR_MAX_ACTIONS && Math.random() < pct(att.velocidad, EXTRA_TURN_CAP)) {
+        if (def.hp > 0 && actions < WAR_MAX_ACTIONS && Math.random() < pct(att.velocidad, EXTRA_TURN_CAP, att.level)) {
             act(att, def, actor, true);
         }
         meTurn = !meTurn; // le toca al otro.
@@ -307,7 +437,7 @@ function endFight(socketId, p, instant) {
     p.fight = null;
     p.rival = null;
 
-    const reward = f.result === 'win' ? WAR_REWARD : 0;
+    const reward = f.result === 'win' ? f.reward : 0; // el premio se fijó al buscar al rival.
     p.money += reward;
 
     if (!instant) {
@@ -321,7 +451,7 @@ function endFight(socketId, p, instant) {
 // RANKINGS Y GUARDADO
 // ============================================================
 
-// Recarga los rankings desde MongoDB (cada 10 s y cuando cambian los clanes).
+// Recarga los rankings desde MongoDB (cada 10 s y cuando cambian los clanes o nombres).
 async function refreshTop() {
     try {
         topScoreCache = await users
@@ -403,7 +533,9 @@ async function saveProgress(list) {
                 stats: p.stats,
                 class: p.cls,
                 clanId: p.clanId,
-                clanRole: p.clanRole
+                clanRole: p.clanRole,
+                searchCharges: p.searchCharges,
+                searchRechargeAt: p.searchRechargeAt
             } }
         }
     })));
@@ -451,10 +583,13 @@ function buildState(p, now) {
         fame: p.fame,
         statPoints: p.statPoints,
         stats: p.stats,
-        effects: describeStats(p.stats),      // texto del efecto de cada estadística.
-        maxHp: p.stats.vida * HP_PER_VIDA,    // vida total en combate.
+        effects: describeStats(p.stats, p.level),   // texto del efecto de cada estadística.
+        maxHp: p.stats.vida * HP_PER_VIDA,          // vida total en combate.
         className: CLASSES[p.cls].name,
         clan: p.clanName,
+        searchCharges: p.searchCharges,             // cargas de búsqueda de rival.
+        searchMax: SEARCH_MAX,
+        searchRechargeMs: p.searchCharges > 0 ? 0 : Math.max(0, p.searchRechargeAt - now), // espera restante.
         mission: mission ? {
             id: mission.id,
             name: mission.name,
@@ -479,6 +614,7 @@ io.on('connection', (socket) => {
     socket.emit('clanRanking', clanCache);
 
     // ---------- LOGIN / REGISTRO ----------
+    // "data.noCreate" lo manda la página al RECONECTAR: así nunca se crea una cuenta por error.
     socket.on('auth', async (data, cb) => {
         try {
             const name = String(data?.name || '').trim().slice(0, 20);
@@ -487,20 +623,31 @@ io.on('connection', (socket) => {
             if (name.length < 3) return cb({ ok: false, error: 'El usuario debe tener al menos 3 caracteres.' });
             if (password.length < 4) return cb({ ok: false, error: 'La contraseña debe tener al menos 4 caracteres.' });
 
-            const key = name.toLowerCase(); // "Juan" y "juan" son el mismo usuario.
-
-            if (Object.values(online).some(p => p.key === key)) {
-                return cb({ ok: false, error: 'Ese usuario ya está conectado.' });
-            }
-
+            const nameKey = name.toLowerCase(); // "Juan" y "juan" son el mismo usuario.
             const now = Date.now();
-            let user = await users.findOne({ _id: key });
+            let user = await findUserByNameKey(nameKey);
 
-            if (!user) {
-                // Usuario nuevo: lo creamos con los valores iniciales del juego.
+            if (user) {
+                // Usuario existente: primero vemos que no esté ya conectado (por su ID interno)...
+                if (Object.values(online).some(p => p.key === user._id)) {
+                    return cb({ ok: false, code: 'online', error: 'Ese usuario ya está conectado.' });
+                }
+                // ...y después verificamos la contraseña.
+                const a = Buffer.from(hashPassword(password, user.salt), 'hex');
+                const b = Buffer.from(user.hash, 'hex');
+                if (!crypto.timingSafeEqual(a, b)) {
+                    return cb({ ok: false, error: 'Contraseña incorrecta.' });
+                }
+            } else {
+                // No existe. Si es una reconexión automática, NO creamos nada.
+                if (data?.noCreate) {
+                    return cb({ ok: false, error: 'No encontramos tu usuario. Iniciá sesión de nuevo.' });
+                }
+                // Usuario nuevo: ID interno aleatorio (fijo para siempre) + nombre aparte.
                 const salt = crypto.randomBytes(16).toString('hex');
                 user = {
-                    _id: key, name, salt, hash: hashPassword(password, salt),
+                    _id: crypto.randomBytes(8).toString('hex'),
+                    nameKey, name, salt, hash: hashPassword(password, salt),
                     score: 0,
                     money: 0,
                     energy: MAX_ENERGY,
@@ -513,19 +660,20 @@ io.on('connection', (socket) => {
                     class: DEFAULT_CLASS,
                     stats: { ...CLASSES[DEFAULT_CLASS].stats }, // copia de las stats base de la clase.
                     clanId: null,
-                    clanRole: 'miembro'
+                    clanRole: 'miembro',
+                    searchCharges: SEARCH_MAX,
+                    searchRechargeAt: 0
                 };
-                await users.insertOne(user);
-            } else {
-                // Usuario existente: verificamos la contraseña.
-                const a = Buffer.from(hashPassword(password, user.salt), 'hex');
-                const b = Buffer.from(user.hash, 'hex');
-                if (!crypto.timingSafeEqual(a, b)) {
-                    return cb({ ok: false, error: 'Contraseña incorrecta.' });
+                try {
+                    await users.insertOne(user);
+                } catch (e) {
+                    // 11000 = otro jugador acaba de registrar ese mismo nombre.
+                    if (e.code === 11000) return cb({ ok: false, error: 'Ese nombre se acaba de ocupar, probá de nuevo.' });
+                    throw e;
                 }
             }
 
-            const player = buildPlayer(key, user, now);
+            const player = buildPlayer(user._id, user, now);
 
             // Si tiene clan, buscamos su nombre. Si el clan ya no existe, lo sacamos.
             if (player.clanId) {
@@ -534,10 +682,15 @@ io.on('connection', (socket) => {
                 else player.clanId = null;
             }
 
+            // Volvemos a chequear justo antes de entrar (por si dos sockets entraron a la vez).
+            if (Object.values(online).some(p => p.key === player.key)) {
+                return cb({ ok: false, code: 'online', error: 'Ese usuario ya está conectado.' });
+            }
             online[socket.id] = player;
 
             // Ponemos al día lo que pasó mientras estaba desconectado:
             refreshEnergy(player, now);
+            refreshSearch(player, now);
             const finished = finishMissionIfDone(player, now);
 
             cb({ ok: true, name: user.name });  // login correcto.
@@ -550,7 +703,11 @@ io.on('connection', (socket) => {
                 chatTtlMs: CHAT_TTL_SECONDS * 1000,
                 statCost: STAT_COST,
                 warEnergy: WAR_ENERGY,
-                warReward: WAR_REWARD
+                warReward: WAR_REWARD,
+                searchMax: SEARCH_MAX,
+                searchRechargeMs: SEARCH_RECHARGE_MS,
+                nameCooldownMs: NAME_COOLDOWN_MS,
+                clanRulesMax: CLAN_RULES_MAX
             });
             socket.emit('missions', MISSIONS);
             sendState(socket.id, player, now);
@@ -569,6 +726,51 @@ io.on('connection', (socket) => {
         } catch (err) {
             console.error(err);
             cb({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        }
+    });
+
+    // ---------- CAMBIAR MI NOMBRE DE USUARIO ----------
+    // El nombre se guarda aparte del ID interno, así que no se pierde nada al cambiarlo.
+    // OJO: es también el nombre con el que se inicia sesión.
+    socket.on('changeName', async (rawName, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
+        p.busy = true;
+        try {
+            const now = Date.now();
+            const wait = p.nameChangedAt + NAME_COOLDOWN_MS - now;
+            if (wait > 0) return reply({ ok: false, error: `Podés cambiar tu nombre de nuevo en ${fmtWait(wait)}.` });
+
+            const name = cleanName(rawName);
+            if (!name) return reply({ ok: false, error: NAME_ERROR });
+            if (name === p.name) return reply({ ok: false, error: 'Ese ya es tu nombre.' });
+
+            // ¿Lo usa otro jugador? (si es el mío, por ejemplo al cambiar solo mayúsculas, se permite)
+            const nameKey = name.toLowerCase();
+            const existing = await findUserByNameKey(nameKey);
+            if (existing && existing._id !== p.key) return reply({ ok: false, error: 'Ese nombre ya está en uso.' });
+
+            try {
+                await users.updateOne({ _id: p.key }, { $set: { name, nameKey, nameChangedAt: now } });
+            } catch (e) {
+                if (e.code === 11000) return reply({ ok: false, error: 'Ese nombre ya está en uso.' });
+                throw e;
+            }
+
+            p.name = name;
+            p.nameChangedAt = now;
+            await refreshTop();      // los rankings leen el nombre de la base.
+            broadcast();
+            broadcastSlow();
+            if (p.clanId) emitToClan(p.clanId, 'clanChanged'); // los del clan ven el nombre nuevo.
+            reply({ ok: true, name });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        } finally {
+            p.busy = false;
         }
     });
 
@@ -636,8 +838,8 @@ io.on('connection', (socket) => {
         try { await saveProgress([p]); } catch (e) { console.error(e); }
     });
 
-    // ---------- GUERRA: BUSCAR RIVAL (gratis) ----------
-    // Elige al azar a otro jugador de la base y le muestra su tarjeta.
+    // ---------- GUERRA: BUSCAR RIVAL (gasta 1 de las 3 cargas) ----------
+    // Elige al azar a otro jugador de nivel parecido y le muestra su tarjeta.
     socket.on('searchRival', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
 
@@ -646,35 +848,46 @@ io.on('connection', (socket) => {
         if (p.fight) return reply({ ok: false, error: 'Estás en medio de una pelea.' });
         if (p.searching) return reply({ ok: false, error: 'Ya estás buscando.' });
 
+        // ¿Le quedan cargas? (si pasó la espera, se recargan acá mismo)
         const now = Date.now();
+        refreshSearch(p, now);
+        if (p.searchCharges < 1) {
+            return reply({ ok: false, error: `Te quedaste sin búsquedas. Se recargan en ${fmtWait(p.searchRechargeAt - now)}.` });
+        }
         if (now - p.lastSearch < 800) return reply({ ok: false, error: 'Esperá un momento antes de buscar de nuevo.' });
         p.lastSearch = now;
 
         p.searching = true;
         try {
-            // $sample elige un documento al azar; $match excluye a uno mismo.
-            const found = await users.aggregate([
-                { $match: { _id: { $ne: p.key } } },
-                { $sample: { size: 1 } },
-                { $project: { name: 1, level: 1, class: 1, stats: 1 } }
-            ]).toArray();
+            const result = await findRival(p);
 
             if (p.fight) return reply({ ok: false, error: 'Estás en medio de una pelea.' }); // empezó otra mientras buscábamos.
-            if (!found.length) return reply({ ok: false, error: 'Todavía no hay otros jugadores para pelear.' });
+            if (!result) return reply({ ok: false, error: 'Todavía no hay otros jugadores para pelear.' });
 
-            const r = found[0];
+            // Recién ahora, que SÍ encontramos a alguien, gastamos la carga.
+            useSearch(p, Date.now());
+
+            const r = result.doc;
             const { cls, stats } = resolveStats(r);
+            const level = r.level ?? 1;
+            const reward = warReward(p.level, level); // el premio queda fijado desde acá.
             // Guardamos una "foto" del rival: con eso se va a pelear.
-            p.rival = { key: r._id, name: r.name, level: r.level ?? 1, cls, stats };
+            p.rival = { key: r._id, name: r.name, level, cls, stats, reward };
+
+            sendState(socket.id, p, Date.now());
+            saveProgress([p]).catch(console.error); // guardamos las cargas.
 
             reply({
                 ok: true,
                 rival: {
                     name: r.name,
-                    level: r.level ?? 1,
+                    level,
                     className: CLASSES[cls].name,
                     stats,
-                    maxHp: stats.vida * HP_PER_VIDA
+                    maxHp: stats.vida * HP_PER_VIDA,
+                    reward,
+                    levelDiff: level - p.level,     // positivo: está por encima tuyo.
+                    expanded: result.expanded       // true si no había nadie cerca de tu nivel.
                 }
             });
         } catch (e) {
@@ -706,8 +919,8 @@ io.on('connection', (socket) => {
         const rv = makeFighter(p.rival.name, p.rival.level, p.rival.cls, p.rival.stats);
         const outcome = simulateFight(me, rv);
 
-        // Guardamos la pelea y mandamos un golpe cada WAR_TURN_MS (el cliente lo anima).
-        p.fight = { events: outcome.events, result: outcome.result, index: 0, timer: null };
+        // Guardamos la pelea (con el premio ya fijado) y mandamos un golpe cada WAR_TURN_MS.
+        p.fight = { events: outcome.events, result: outcome.result, index: 0, timer: null, reward: p.rival.reward };
         p.fight.timer = setInterval(() => stepFight(socket.id, p), WAR_TURN_MS);
 
         sendState(socket.id, p, now);
@@ -729,20 +942,24 @@ io.on('connection', (socket) => {
             if (p.level < CLAN_CREATE_LEVEL) {
                 return reply({ ok: false, error: `Necesitás nivel ${CLAN_CREATE_LEVEL} para crear un clan.` });
             }
-            const name = String(rawName || '').trim().replace(/\s+/g, ' ').slice(0, 20);
-            if (name.length < 3) return reply({ ok: false, error: 'El nombre del clan debe tener al menos 3 caracteres.' });
+            const name = cleanName(rawName);
+            if (!name) return reply({ ok: false, error: NAME_ERROR });
 
-            const key = name.toLowerCase(); // el ID del clan es su nombre en minúsculas (único).
+            const nameKey = name.toLowerCase();
+            if (await findClanByNameKey(nameKey)) return reply({ ok: false, error: 'Ya existe un clan con ese nombre.' });
+
+            // El clan tiene un ID interno aleatorio y fijo: así su nombre se puede cambiar después.
+            const id = crypto.randomBytes(8).toString('hex');
             try {
-                await clans.insertOne({ _id: key, name, owner: p.key, createdAt: Date.now() });
+                await clans.insertOne({ _id: id, nameKey, name, owner: p.key, rules: '', createdAt: Date.now() });
             } catch (e) {
                 if (e.code === 11000) return reply({ ok: false, error: 'Ya existe un clan con ese nombre.' });
                 throw e;
             }
-            p.clanId = key;
+            p.clanId = id;
             p.clanName = name;
             p.clanRole = 'miembro';
-            await users.updateOne({ _id: p.key }, { $set: { clanId: key, clanRole: 'miembro' } });
+            await users.updateOne({ _id: p.key }, { $set: { clanId: id, clanRole: 'miembro' } });
             await refreshTop();
             broadcastSlow();
             reply({ ok: true });
@@ -788,7 +1005,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Salir del clan. Si era el líder, hereda un Oficial (o, si no hay, otro miembro);
+    // Salir del clan. Si era el líder, hereda un Colíder (o, si no hay, un Oficial, o cualquier miembro);
     // si no queda nadie, se borra el clan y su chat.
     socket.on('leaveClan', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
@@ -807,10 +1024,12 @@ io.on('connection', (socket) => {
 
             const clan = await clans.findOne({ _id: clanKey });
             if (clan && clan.owner === p.key) {
-                // Era el líder: primero buscamos un Oficial; si no hay, cualquier miembro.
+                // Era el líder: buscamos al reemplazo, de mayor a menor rango.
+                const pick = { projection: { _id: 1 } };
                 const next =
-                    await users.findOne({ clanId: clanKey, clanRole: 'oficial' }, { projection: { _id: 1 } }) ||
-                    await users.findOne({ clanId: clanKey }, { projection: { _id: 1 } });
+                    await users.findOne({ clanId: clanKey, clanRole: 'colider' }, pick) ||
+                    await users.findOne({ clanId: clanKey, clanRole: 'oficial' }, pick) ||
+                    await users.findOne({ clanId: clanKey }, pick);
                 if (next) {
                     await clans.updateOne({ _id: clanKey }, { $set: { owner: next._id } });
                 } else {
@@ -830,7 +1049,74 @@ io.on('connection', (socket) => {
         }
     });
 
-    // EXPULSAR a un miembro (solo el líder).
+    // CAMBIAR EL NOMBRE DEL CLAN (solo el líder).
+    socket.on('renameClan', async (rawName, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
+        p.busy = true;
+        try {
+            const ctx = await getClanAndRole(p); // verificamos EN EL SERVIDOR que sea el líder.
+            if (!ctx || ctx.role !== 'lider') return reply({ ok: false, error: 'Solo el líder puede cambiar el nombre del clan.' });
+            const clan = ctx.clan;
+
+            const now = Date.now();
+            const wait = (clan.nameChangedAt || 0) + NAME_COOLDOWN_MS - now;
+            if (wait > 0) return reply({ ok: false, error: `El nombre del clan se puede cambiar de nuevo en ${fmtWait(wait)}.` });
+
+            const name = cleanName(rawName);
+            if (!name) return reply({ ok: false, error: NAME_ERROR });
+            if (name === clan.name) return reply({ ok: false, error: 'Ese ya es el nombre del clan.' });
+
+            const nameKey = name.toLowerCase();
+            const existing = await findClanByNameKey(nameKey);
+            if (existing && existing._id !== clan._id) return reply({ ok: false, error: 'Ya existe un clan con ese nombre.' });
+
+            try {
+                await clans.updateOne({ _id: clan._id }, { $set: { name, nameKey, nameChangedAt: now } });
+            } catch (e) {
+                if (e.code === 11000) return reply({ ok: false, error: 'Ya existe un clan con ese nombre.' });
+                throw e;
+            }
+
+            // Actualizamos el nombre en la memoria de todos los miembros conectados.
+            Object.values(online).forEach(o => { if (o.clanId === clan._id) o.clanName = name; });
+            await refreshTop();
+            broadcastSlow();
+            emitToClan(clan._id, 'clanChanged');
+            emitToClan(clan._id, 'clanNotice', `El clan ahora se llama ${name}.`);
+            reply({ ok: true, name });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        } finally {
+            p.busy = false;
+        }
+    });
+
+    // EDITAR LAS REGLAS DEL CLAN (líder y colíderes).
+    socket.on('setClanRules', async (rawText, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        try {
+            const ctx = await getClanAndRole(p);
+            if (!ctx || !MANAGER_ROLES.includes(ctx.role)) {
+                return reply({ ok: false, error: 'Solo el líder y los colíderes pueden editar las reglas.' });
+            }
+            // Texto limpio: saltos de línea normales, sin espacios de más, máximo CLAN_RULES_MAX caracteres.
+            const text = String(rawText || '').replace(/\r\n/g, '\n').trim().slice(0, CLAN_RULES_MAX);
+            await clans.updateOne({ _id: ctx.clan._id }, { $set: { rules: text } });
+            emitToClan(ctx.clan._id, 'clanChanged'); // todos los miembros ven las reglas nuevas.
+            reply({ ok: true });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        }
+    });
+
+    // EXPULSAR a un miembro (líder y colíderes, según el rango del expulsado).
     socket.on('kickMember', async (targetKey, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -838,31 +1124,32 @@ io.on('connection', (socket) => {
         if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
         p.busy = true;
         try {
-            const clan = await getClanIfLeader(p); // verificamos EN EL SERVIDOR que sea el líder.
-            if (!clan) return reply({ ok: false, error: 'Solo el líder del clan puede hacer esto.' });
+            const ctx = await getClanAndRole(p); // verificamos EN EL SERVIDOR el rango de quien pide.
+            if (!ctx || !MANAGER_ROLES.includes(ctx.role)) {
+                return reply({ ok: false, error: 'Solo el líder y los colíderes pueden hacer esto.' });
+            }
+            const { clan, role } = ctx;
 
             const key = String(targetKey || '');
             if (key === p.key) return reply({ ok: false, error: 'No podés expulsarte a vos mismo. Usá "Salir del clan".' });
 
+            const target = await findClanMember(clan, key); // rango real del expulsado.
+            if (!target) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+            if (!canManage(role, target.role)) return reply({ ok: false, error: 'No tenés permiso sobre ese rango.' });
+
             // Si el expulsado está conectado, actualizamos su memoria PRIMERO.
             // (Si no, el guardado automático de cada 10 s volvería a escribir su clan viejo.)
-            const target = findOnlineByKey(key);
-            if (target) {
-                if (target.p.clanId !== clan._id) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
-                target.p.clanId = null;
-                target.p.clanName = null;
-                target.p.clanRole = 'miembro';
+            if (target.live) {
+                target.live.p.clanId = null;
+                target.live.p.clanName = null;
+                target.live.p.clanRole = 'miembro';
             }
             // El filtro { clanId } asegura que solo se expulse a alguien de ESTE clan.
-            const res = await users.updateOne(
-                { _id: key, clanId: clan._id },
-                { $set: { clanId: null, clanRole: 'miembro' } }
-            );
-            if (!target && res.matchedCount === 0) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+            await users.updateOne({ _id: key, clanId: clan._id }, { $set: { clanId: null, clanRole: 'miembro' } });
 
-            if (target) {
-                io.to(target.id).emit('clanNotice', `Fuiste expulsado del clan ${clan.name}.`);
-                sendState(target.id, target.p, Date.now());
+            if (target.live) {
+                io.to(target.live.id).emit('clanNotice', `Fuiste expulsado del clan ${clan.name}.`);
+                sendState(target.live.id, target.live.p, Date.now());
             }
             await refreshTop();
             broadcastSlow();
@@ -876,7 +1163,9 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ASCENDER o DEGRADAR a un miembro (solo el líder). data = { key, role }.
+    // CAMBIAR EL RANGO de un miembro. data = { key, role }.
+    // - El líder puede dejar a alguien como Miembro, Oficial o Colíder.
+    // - El colíder solo mueve a Miembros y Oficiales entre Miembro y Oficial.
     socket.on('setMemberRole', async (data, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -884,26 +1173,31 @@ io.on('connection', (socket) => {
         if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
         p.busy = true;
         try {
-            const clan = await getClanIfLeader(p);
-            if (!clan) return reply({ ok: false, error: 'Solo el líder del clan puede hacer esto.' });
+            const ctx = await getClanAndRole(p);
+            if (!ctx || !MANAGER_ROLES.includes(ctx.role)) {
+                return reply({ ok: false, error: 'Solo el líder y los colíderes pueden hacer esto.' });
+            }
+            const { clan, role: myRole } = ctx;
 
             const key = String(data?.key || '');
-            const role = data?.role;
-            if (!CLAN_ROLES.includes(role)) return reply({ ok: false, error: 'Rango inválido.' });
+            const newRole = data?.role;
+            // Rangos que puede asignar quien pide.
+            const assignable = myRole === 'lider' ? ['miembro', 'oficial', 'colider'] : ['miembro', 'oficial'];
+            if (!assignable.includes(newRole)) return reply({ ok: false, error: 'No podés asignar ese rango.' });
             if (key === p.key) return reply({ ok: false, error: 'No podés cambiar tu propio rango.' });
 
-            const target = findOnlineByKey(key);
-            if (target) {
-                if (target.p.clanId !== clan._id) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
-                target.p.clanRole = role;
-            }
-            const res = await users.updateOne({ _id: key, clanId: clan._id }, { $set: { clanRole: role } });
-            if (!target && res.matchedCount === 0) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+            const target = await findClanMember(clan, key);
+            if (!target) return reply({ ok: false, error: 'Ese jugador no está en tu clan.' });
+            if (!canManage(myRole, target.role)) return reply({ ok: false, error: 'No tenés permiso sobre ese rango.' });
+            if (target.role === newRole) return reply({ ok: true }); // ya tenía ese rango.
 
-            if (target) {
-                io.to(target.id).emit('clanNotice', role === 'oficial'
-                    ? `Fuiste ascendido a Oficial en ${clan.name}.`
-                    : `Ya no sos Oficial en ${clan.name}.`);
+            // Igual que al expulsar: si está conectado, actualizamos su memoria primero.
+            if (target.live) target.live.p.clanRole = newRole;
+            await users.updateOne({ _id: key, clanId: clan._id }, { $set: { clanRole: newRole } });
+
+            if (target.live) {
+                const labels = { miembro: 'Miembro', oficial: 'Oficial', colider: 'Colíder' };
+                io.to(target.live.id).emit('clanNotice', `Tu rango en ${clan.name} ahora es ${labels[newRole]}.`);
             }
             emitToClan(clan._id, 'clanChanged');
             reply({ ok: true });
@@ -915,7 +1209,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Datos de MI clan (nombre, mi rango y lista de miembros).
+    // Datos de MI clan (nombre, reglas, mi rango y lista de miembros).
     socket.on('getClan', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -930,21 +1224,24 @@ io.on('connection', (socket) => {
 
             const members = docs.map(m => {
                 const live = findOnlineByKey(m._id); // si está conectado usamos sus datos en vivo.
-                const stored = live ? live.p.clanRole : (m.clanRole ?? 'miembro');
+                const stored = live ? live.p.clanRole : m.clanRole;
                 return {
-                    key: m._id,                                    // sirve para expulsar/ascender.
-                    name: m.name,
+                    key: m._id,                                    // ID interno: sirve para expulsar/cambiar rango.
+                    name: live ? live.p.name : m.name,
                     level: live ? live.p.level : (m.level ?? 1),
-                    role: m._id === clan.owner ? 'lider' : stored, // 'lider' | 'oficial' | 'miembro'
+                    // 'lider' | 'colider' | 'oficial' | 'miembro'
+                    role: m._id === clan.owner ? 'lider' : (ROLE_RANK[stored] !== undefined ? stored : 'miembro'),
                     online: !!live
                 };
             });
-            // Orden: líder, oficiales, miembros; dentro de cada grupo, por nivel.
-            const order = { lider: 0, oficial: 1, miembro: 2 };
-            members.sort((a, b) => order[a.role] - order[b.role] || b.level - a.level);
+            // Orden: de mayor a menor rango; dentro de cada grupo, por nivel.
+            members.sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role] || b.level - a.level);
 
             const me = members.find(m => m.key === p.key);
-            reply({ ok: true, clan: { name: clan.name, myRole: me ? me.role : 'miembro', members } });
+            reply({
+                ok: true,
+                clan: { name: clan.name, rules: clan.rules || '', myRole: me ? me.role : 'miembro', members }
+            });
         } catch (e) {
             console.error(e);
             reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
@@ -1031,6 +1328,7 @@ setInterval(async () => {
     entries.forEach(([id, p]) => {
         p.score++;                  // +1 punto por segundo (ranking de actividad).
         refreshEnergy(p, now);      // recarga de energía.
+        refreshSearch(p, now);      // recarga de cargas de búsqueda.
 
         const finished = finishMissionIfDone(p, now);
         if (finished) {
@@ -1055,6 +1353,12 @@ setInterval(async () => {
 // ============================================================
 // ARRANQUE
 // ============================================================
+
+// Ejecuta una tarea de preparación; si falla, lo muestra pero no frena el servidor.
+async function safely(label, fn) {
+    try { await fn(); } catch (e) { console.error('Error en ' + label + ':', e); }
+}
+
 async function start() {
     await client.connect();                       // conecta a MongoDB.
     const db = client.db('juego');
@@ -1063,17 +1367,31 @@ async function start() {
     clans = db.collection('clans');               // clanes.
     clanMessages = db.collection('clanMessages'); // chat de clan.
 
-    // Preparamos los índices. Si algo falla, lo mostramos pero el servidor arranca igual.
-    try {
+    // --- Mensajes e índices del chat ---
+    await safely('chat global', async () => {
         await messages.updateMany(
             { createdAt: { $exists: false } },
             [{ $set: { createdAt: { $toDate: '$ts' } } }]
         );
         await messages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_TTL_SECONDS });
+    });
+    await safely('chat de clan', async () => {
         await clanMessages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CLAN_CHAT_TTL_SECONDS });
         await clanMessages.createIndex({ clanId: 1, ts: -1 });
-        await users.createIndex({ clanId: 1 });
-    } catch (e) { console.error('Error creando índices:', e); }
+    });
+
+    // --- Migración a nombres cambiables ---
+    // A los usuarios y clanes viejos les agregamos "nameKey" (su nombre en minúsculas, que era su _id).
+    await safely('migración de usuarios', async () => {
+        await users.updateMany({ nameKey: { $exists: false } }, [{ $set: { nameKey: '$_id' } }]);
+        // Índice único: impide que dos usuarios tengan el mismo nombre. "sparse" ignora los que no lo tengan.
+        await users.createIndex({ nameKey: 1 }, { unique: true, sparse: true });
+    });
+    await safely('migración de clanes', async () => {
+        await clans.updateMany({ nameKey: { $exists: false } }, [{ $set: { nameKey: '$_id' } }]);
+        await clans.createIndex({ nameKey: 1 }, { unique: true, sparse: true });
+    });
+    await safely('índice de clanId', () => users.createIndex({ clanId: 1 }));
 
     await refreshTop();
     server.listen(process.env.PORT || 3000, () => console.log('Servidor corriendo'));
