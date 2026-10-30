@@ -738,3 +738,57 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     .float-num.crit { font-size: 28px; }
     #fighterMe.acting, #fighterRival.acting { animation-duration: 0.5s; }
 }
+/* ============================================================
+   EDITAR PERFIL
+   ============================================================ */
+#editNameForm { display: flex; flex-direction: column; gap: 8px; }
+#editProfile .muted { margin: 0; }
+
+/* ============================================================
+   GUERRA: nota del rival e información de búsquedas
+   ============================================================ */
+#rivalNote, #searchInfo { min-height: 18px; margin: 6px 0; }
+
+/* ============================================================
+   CLAN: Colíder, selector de rango, renombrar y reglas
+   ============================================================ */
+.role-tag.colider { color: #f9a8d4; border-color: #f9a8d4; }
+
+/* Desplegable para cambiar el rango de un miembro */
+.role-select {
+    padding: 6px 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+#renameClanForm { margin-top: 12px; }
+
+/* Reglas: texto para los miembros y editor para líder y colíderes */
+#rulesView {
+    min-height: 120px;
+    padding: 12px;
+    white-space: pre-wrap;          /* respeta los saltos de línea que escribió el líder */
+    overflow-wrap: anywhere;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+#rulesView.empty { color: var(--muted); }
+#rulesForm { display: flex; flex-direction: column; gap: 8px; }
+#rulesInput {
+    width: 100%;
+    min-height: 180px;
+    padding: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    resize: vertical;
+}
+.rules-count { font-size: 12px; color: var(--muted); text-align: right; }
