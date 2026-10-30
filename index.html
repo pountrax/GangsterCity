@@ -28,6 +28,21 @@
         <!-- ================== JUEGO (se muestra al iniciar sesión) ================== -->
         <div id="game" hidden>
 
+            <!-- ===== Campanita de notificaciones (arriba a la derecha, siempre visible) ===== -->
+            <div id="notifBox">
+                <button id="notifBtn" type="button" title="Notificaciones">
+                    🔔<span id="notifBadge" class="badge" hidden>0</span>
+                </button>
+                <div id="notifPanel" hidden>
+                    <div class="notif-head">
+                        <strong>Notificaciones</strong>
+                        <button id="notifClose" type="button">✖</button>
+                    </div>
+                    <!-- La lista la crea script.js -->
+                    <div id="notifList"></div>
+                </div>
+            </div>
+
             <!-- #layout: dos columnas (izquierda: personaje y menú / derecha: contenido) -->
             <div id="layout">
 
@@ -37,7 +52,6 @@
                     <!-- Recuadro del personaje -->
                     <div class="panel" id="profile">
                         <div class="profile-head">
-                            <!-- Icono del personaje. Más adelante irá la imagen armada por capas -->
                             <div id="avatar">?</div>
                             <div>
                                 <div id="nameValue" class="profile-name">---</div>
@@ -78,8 +92,7 @@
 
                         <!-- Botón de editar perfil + panel que se abre/cierra -->
                         <button id="editProfileBtn" class="action-btn full" type="button">✏️ Editar perfil</button>
-                             <div id="editProfile" hidden>
-                            <!-- Cambiar nombre de usuario (es también el nombre para iniciar sesión) -->
+                        <div id="editProfile" hidden>
                             <form id="editNameForm">
                                 <label>Nombre de usuario
                                     <input id="editName" type="text" maxlength="20" autocomplete="off">
@@ -101,10 +114,10 @@
                         <button class="nav-btn active" data-tab="misiones"><span class="nav-icon">🎯</span> Misiones</button>
                         <button class="nav-btn" data-tab="inventario">
                             <span class="nav-icon">🎒</span> Inventario
-                            <!-- Globito rojo: aparece cuando hay puntos de estadística sin gastar -->
                             <span id="inventoryBadge" class="badge" hidden>0</span>
                         </button>
                         <button class="nav-btn" data-tab="guerra"><span class="nav-icon">⚔️</span> Guerra</button>
+                        <button class="nav-btn" data-tab="tienda"><span class="nav-icon">🛒</span> Tienda</button>
                         <button class="nav-btn" data-tab="clan"><span class="nav-icon">🏴</span> Clan</button>
                     </nav>
                 </aside>
@@ -115,15 +128,12 @@
                     <!-- ===== MISIONES ===== -->
                     <section id="tab-misiones" class="tab active">
                         <h2>Misiones</h2>
-                        <!-- Espacio reservado para la imagen de misiones -->
                         <div class="placeholder">🖼️ Acá irá la imagen de misiones</div>
 
-                        <!-- Misión en curso (se muestra solo mientras hay una) -->
                         <div id="missionActive" hidden>
                             <p id="missionActiveText"></p>
                             <div class="bar"><div id="missionBar" class="bar-fill mission-fill"></div></div>
                         </div>
-                        <!-- Los botones los crea script.js con la lista del servidor -->
                         <div id="missionList"></div>
                         <p id="missionMsg"></p>
                     </section>
@@ -132,47 +142,52 @@
                     <section id="tab-inventario" class="tab">
                         <h2>Inventario</h2>
 
-                        <!-- Estadísticas del personaje -->
-                        <div class="stats-box">
-                            <div class="stats-head">
-                                <h3>Estadísticas</h3>
-                                <div class="points-badge">Puntos disponibles: <strong id="statPointsValue">0</strong></div>
-                            </div>
-                            <!-- Las filas (Vida, Aguante...) las crea script.js -->
-                            <div id="statsList"></div>
-                            <p id="statsMsg" class="muted"></p>
+                        <!-- Subpestañas: Inventario (estadísticas) / Maletín de guerra -->
+                        <div class="sub-tabs">
+                            <button class="sub-tab active" data-invpane="stats" type="button">🎒 Inventario</button>
+                            <button class="sub-tab" data-invpane="case" type="button">💼 Maletín de guerra</button>
                         </div>
 
-                        <div id="inventoryLayout">
-                            <!-- Ranuras de equipo (lo que lleva puesto el personaje) -->
-                            <div id="equipment">
-                                <h3>Equipado</h3>
-                                <div class="equip-slot"><div class="slot"></div><span>Cabeza</span></div>
-                                <div class="equip-slot"><div class="slot"></div><span>Torso</span></div>
-                                <div class="equip-slot"><div class="slot"></div><span>Piernas</span></div>
-                                <div class="equip-slot"><div class="slot"></div><span>Arma</span></div>
+                        <!-- Subpestaña 1: estadísticas -->
+                        <div id="invPane-stats" class="inv-pane active">
+                            <div class="stats-box">
+                                <div class="stats-head">
+                                    <h3>Estadísticas</h3>
+                                    <div class="points-badge">Puntos disponibles: <strong id="statPointsValue">0</strong></div>
+                                </div>
+                                <div id="statsList"></div>
+                                <p id="statsMsg" class="muted"></p>
                             </div>
-                            <!-- Mochila: las casillas las crea script.js -->
-                            <div>
-                                <h3>Mochila</h3>
-                                <div id="bagGrid"></div>
-                                <p class="muted">Todavía no tenés objetos.</p>
+                        </div>
+
+                        <!-- Subpestaña 2: maletín de guerra -->
+                        <div id="invPane-case" class="inv-pane">
+                            <p class="muted" id="caseHint"></p>
+                            <div id="caseWrap"><div id="caseGrid"></div></div>
+                            <div class="case-actions">
+                                <button id="expandCaseBtn" class="action-btn" type="button">Expandir maletín</button>
                             </div>
+                        </div>
+
+                        <!-- Mochila: siempre visible debajo (así se puede arrastrar al maletín) -->
+                        <div id="bagBox" class="stats-box">
+                            <div class="stats-head">
+                                <h3>Mochila <small id="bagCount" class="muted"></small></h3>
+                            </div>
+                            <div id="bagGrid"></div>
+                            <!-- Info del objeto seleccionado con sus botones -->
+                            <div id="itemInfo"></div>
+                            <p id="invMsg" class="muted"></p>
                         </div>
                     </section>
 
                     <!-- ===== GUERRA ===== -->
-                                        <!-- ===== GUERRA ===== -->
-                                       <!-- ===== GUERRA ===== -->
                     <section id="tab-guerra" class="tab">
                         <h2>Guerra</h2>
-                        <!-- El texto con el costo y el premio lo completa script.js -->
                         <p class="muted" id="warInfo"></p>
 
                         <!-- Arena: tu tarjeta | VS | tarjeta del rival -->
                         <div id="arena">
-
-                            <!-- Tu personaje -->
                             <div class="fighter" id="fighterMe">
                                 <div class="f-avatar">?</div>
                                 <div class="f-name">---</div>
@@ -184,7 +199,6 @@
 
                             <div class="vs">VS</div>
 
-                            <!-- Rival (empieza vacío hasta que busques uno) -->
                             <div class="fighter empty" id="fighterRival">
                                 <div class="f-avatar">?</div>
                                 <div class="f-name">Sin rival</div>
@@ -195,28 +209,43 @@
                             </div>
                         </div>
 
-                        <!-- Diferencia de nivel y premio del rival encontrado -->
                         <p id="rivalNote" class="muted"></p>
-
-                        <!-- Cartel de estado: "Comienza el combate", "Turno extra", resultado... -->
                         <div id="warBanner" hidden></div>
 
-                        <!-- Botones: buscar rival / pelear -->
                         <div id="warActions">
                             <button id="searchRivalBtn" class="action-btn" type="button">🔍 Buscar rival</button>
                             <button id="fightBtn" class="action-btn danger" type="button" hidden>⚔️ Pelear</button>
                         </div>
-                        <!-- Cargas de búsqueda y cuenta regresiva -->
                         <p id="searchInfo" class="muted"></p>
                         <p id="warMsg" class="muted"></p>
+
+                        <!-- Buscar a un jugador puntual por su nombre -->
+                        <h3>Desafiar a un jugador</h3>
+                        <form id="playerSearchForm" class="inline-form">
+                            <input id="playerSearchInput" type="text" maxlength="20" placeholder="Buscar jugador por nombre..." autocomplete="off">
+                            <button type="submit" class="action-btn">🔎 Buscar</button>
+                        </form>
+                        <div id="playerResults"></div>
 
                         <h3>Registro del combate</h3>
                         <div id="warLog"></div>
                     </section>
 
-                    <!-- ===== CLAN ===== -->
-                                       <!-- ===== CLAN ===== -->
-                                        <!-- ===== CLAN (FAMILIA) ===== -->
+                    <!-- ===== TIENDA ===== -->
+                    <section id="tab-tienda" class="tab">
+                        <h2>Tienda</h2>
+                        <p class="muted" id="shopInfo"></p>
+                        <!-- Las ofertas las crea script.js -->
+                        <div id="shopOffers"></div>
+                        <p id="shopTimer" class="muted"></p>
+                        <div class="shop-actions">
+                            <button id="shopManualBtn" class="action-btn" type="button">🔄 Recargar tienda</button>
+                        </div>
+                        <p id="shopManualInfo" class="muted"></p>
+                        <p id="shopMsg" class="muted"></p>
+                    </section>
+
+                    <!-- ===== CLAN (FAMILIA) ===== -->
                     <section id="tab-clan" class="tab">
                         <h2>Clan</h2>
 
@@ -243,14 +272,12 @@
                                 <button class="sub-tab" data-clanpane="reglas" type="button">📜 Reglas</button>
                             </div>
 
-                            <!-- Subpestaña 1: lista de miembros -->
                             <div id="clanPane-miembros" class="clan-pane active">
                                 <div class="stats-box">
                                     <div class="stats-head">
                                         <h3>Miembros</h3>
                                         <div class="points-badge">Tu rango: <strong id="myRoleValue">---</strong></div>
                                     </div>
-                                    <!-- Las filas las crea script.js -->
                                     <div id="clanMembers"></div>
                                 </div>
                                 <div class="clan-actions">
@@ -258,7 +285,6 @@
                                 </div>
                             </div>
 
-                            <!-- Subpestaña 2: chat del clan -->
                             <div id="clanPane-chat" class="clan-pane">
                                 <div id="clanChatLog"></div>
                                 <form id="clanChatForm" class="inline-form">
@@ -267,11 +293,8 @@
                                 </form>
                             </div>
 
-                            <!-- Subpestaña 3: reglas de la familia -->
                             <div id="clanPane-reglas" class="clan-pane">
-                                <!-- Lo ven los miembros que NO pueden editar -->
                                 <div id="rulesView"></div>
-                                <!-- Lo ven el líder y los colíderes -->
                                 <form id="rulesForm" hidden>
                                     <textarea id="rulesInput" maxlength="1000" placeholder="Escribí las reglas de tu familia..."></textarea>
                                     <div class="rules-count" id="rulesCount">0/1000</div>
@@ -320,14 +343,12 @@
         <section class="panel" id="ranking">
             <h2>🏆 Rankings</h2>
 
-            <!-- Pestañas de rankings. data-rank indica cuál panel abre cada botón -->
             <div id="rankTabs">
                 <button class="rank-tab active" data-rank="actividad">⏱ Actividad</button>
                 <button class="rank-tab" data-rank="clanes">🏴 Clanes</button>
                 <button class="rank-tab" data-rank="fama">⭐ Fama</button>
             </div>
 
-            <!-- 1) Ranking de actividad (tiempo jugado) -->
             <div id="rank-actividad" class="rank-pane active">
                 <div class="score-wrap">
                     <table id="scoreboard" class="board">
@@ -337,7 +358,6 @@
                 </div>
             </div>
 
-            <!-- 2) Ranking de clanes (por fama total de sus miembros) -->
             <div id="rank-clanes" class="rank-pane">
                 <div class="score-wrap">
                     <table id="clanBoard" class="board">
@@ -347,7 +367,6 @@
                 </div>
             </div>
 
-            <!-- 3) Ranking de fama de personaje -->
             <div id="rank-fama" class="rank-pane">
                 <div class="score-wrap">
                     <table id="fameBoard" class="board">
