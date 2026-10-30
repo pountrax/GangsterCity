@@ -792,3 +792,287 @@ h3 { margin: 16px 0 8px; font-size: 16px; }
     resize: vertical;
 }
 .rules-count { font-size: 12px; color: var(--muted); text-align: right; }
+/* ============================================================
+   v8: NOTIFICACIONES, INVENTARIO, MALETÍN, TIENDA Y ANIMACIONES
+   ============================================================ */
+
+/* ---------- Iconos de objetos (emoji o imagen) ---------- */
+.icon { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.icon img { max-width: 86%; max-height: 86%; object-fit: contain; pointer-events: none; user-select: none; }
+.icon-emoji { font-size: 28px; line-height: 1; }
+.icon-emoji.flip { display: inline-block; transform: scaleX(-1); } /* la pistola emoji mira a la izquierda: la damos vuelta */
+
+/* ---------- Notificaciones (campanita arriba a la derecha) ---------- */
+#notifBox { position: fixed; top: 10px; right: 10px; z-index: 1000; }
+#notifBtn {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    font-size: 22px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+#notifBtn .badge { position: absolute; top: -4px; right: -4px; margin: 0; }
+#notifBtn.ring { animation: bellRing 0.9s; }
+@keyframes bellRing {
+    0%, 100% { transform: rotate(0); }
+    15% { transform: rotate(20deg); }
+    30% { transform: rotate(-18deg); }
+    45% { transform: rotate(14deg); }
+    60% { transform: rotate(-9deg); }
+    75% { transform: rotate(4deg); }
+}
+#notifPanel {
+    position: absolute;
+    top: 54px;
+    right: 0;
+    width: min(92vw, 360px);
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+.notif-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--panel2);
+    border-bottom: 1px solid var(--border);
+}
+.notif-head button { color: var(--text); background: none; border: none; font-size: 16px; cursor: pointer; }
+.notif-item { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.notif-item:last-child { border-bottom: none; }
+.notif-item.fresh { background: rgba(245, 158, 11, 0.14); }
+.notif-time { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.notif-toggle {
+    margin-top: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.notif-log {
+    margin-top: 6px;
+    padding: 6px 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.notif-log div { padding: 2px 0; }
+.notif-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* ---------- Estadísticas: extra que da el maletín ---------- */
+.stat-value .bonus { color: var(--green); font-size: 13px; }
+
+/* ---------- Subpestañas del inventario ---------- */
+.inv-pane { display: none; }
+.inv-pane.active { display: block; }
+
+/* ---------- Mochila ---------- */
+#bagBox { margin-top: 16px; }
+#bagGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 8px; }
+#bagGrid .slot { max-width: none; position: relative; }
+#bagGrid .slot.filled { cursor: grab; touch-action: none; user-select: none; }
+#bagGrid .slot.selected, .case-item.selected { box-shadow: 0 0 0 3px #fde047; }
+.qty {
+    position: absolute;
+    right: 3px;
+    bottom: 1px;
+    padding: 0 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 6px;
+    pointer-events: none;
+}
+#itemInfo { margin-top: 10px; }
+.item-card {
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.item-card p { margin: 4px 0 8px; font-size: 14px; color: var(--muted); }
+.item-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#invMsg { min-height: 18px; }
+
+/* ---------- Maletín de guerra ---------- */
+#caseWrap { margin: 10px 0; }
+#caseGrid {
+    position: relative;
+    width: min(100%, 330px);
+    aspect-ratio: 1;
+    display: grid;
+    grid-template-columns: repeat(var(--size, 3), 1fr);
+    grid-template-rows: repeat(var(--size, 3), 1fr);
+    background: var(--bg);
+    outline: 3px solid var(--accent);
+    border-radius: 4px;
+    touch-action: none;
+}
+.case-cell { border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03); }
+.case-cell.ok { background: rgba(34, 197, 94, 0.45); }
+.case-cell.bad { background: rgba(239, 68, 68, 0.45); }
+.case-item {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel2);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    overflow: hidden;
+}
+.case-item .icon-emoji { font-size: calc(var(--cell, 60px) * var(--minside, 1) * 0.6); }
+.case-actions { margin-top: 10px; }
+
+/* Objeto que se está arrastrando */
+.drag-ghost {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(42, 48, 59, 0.9);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    opacity: 0.92;
+    pointer-events: none;
+}
+
+/* ---------- Tienda ---------- */
+#shopOffers { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0; }
+.offer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px;
+    text-align: center;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.offer-icon { width: 64px; height: 64px; }
+.offer-icon .icon-emoji { font-size: 44px; }
+.offer-name { font-weight: bold; }
+.offer-desc { font-size: 12px; color: var(--muted); }
+.offer-price { font-weight: bold; color: var(--accent); }
+.shop-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- Guerra: búsqueda por nombre ---------- */
+#playerResults { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.player-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.player-row small { display: block; color: var(--muted); }
+
+/* ---------- Guerra: animaciones de armas ---------- */
+
+/* La pistola sale de la carta, se levanta hacia el rival y dispara */
+.gun-anim { position: absolute; bottom: 34%; width: 62px; height: 62px; z-index: 7; pointer-events: none; }
+.gun-anim.me { right: -28px; }
+.gun-anim.rival { left: -28px; transform: scaleX(-1); } /* la carta del rival mira hacia el otro lado */
+.gun-inner {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    transform-origin: 25% 70%;
+    animation: gunRaise 1s ease-out forwards;
+}
+.gun-inner .icon-emoji { font-size: 46px; }
+@keyframes gunRaise {
+    0%   { opacity: 0; transform: translate(-8px, 46px) rotate(80deg) scale(0.5); }
+    30%  { opacity: 1; transform: translate(0, 16px) rotate(75deg) scale(1); }
+    55%  { opacity: 1; transform: translate(4px, 0) rotate(-6deg) scale(1.1); }
+    66%  { opacity: 1; transform: translate(-7px, 0) rotate(-20deg) scale(1.1); }
+    76%  { opacity: 1; transform: translate(0, 0) rotate(-6deg) scale(1.1); }
+    100% { opacity: 0; transform: translate(0, -6px) rotate(-6deg) scale(1.1); }
+}
+.muzzle {
+    position: absolute;
+    right: -16px;
+    top: 4px;
+    font-size: 30px;
+    opacity: 0;
+    animation: muzzle 1s linear forwards;
+}
+@keyframes muzzle {
+    0%, 60% { opacity: 0; transform: scale(0.3); }
+    64% { opacity: 1; transform: scale(1.3); }
+    74% { opacity: 0; transform: scale(0.8); }
+    100% { opacity: 0; }
+}
+
+/* La granada cae desde arriba sobre el rival y explota */
+.grenade-anim {
+    position: absolute;
+    left: 50%;
+    top: 18%;
+    width: 44px;
+    height: 44px;
+    margin-left: -22px;
+    z-index: 8;
+    pointer-events: none;
+    animation: grenadeFall 0.78s cubic-bezier(0.45, 0, 0.9, 0.6) forwards;
+}
+.grenade-anim .icon-emoji { font-size: 36px; }
+@keyframes grenadeFall {
+    0%   { opacity: 1; transform: translateY(-280px) rotate(0deg) scale(0.8); }
+    100% { opacity: 1; transform: translateY(0) rotate(560deg) scale(1); }
+}
+.boom {
+    position: absolute;
+    left: 50%;
+    top: 14%;
+    z-index: 9;
+    font-size: 80px;
+    line-height: 1;
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.2);
+    pointer-events: none;
+    animation: boom 0.65s ease-out 0.76s forwards;
+}
+@keyframes boom {
+    0%   { opacity: 1; transform: translate(-50%, 0) scale(0.3); }
+    60%  { opacity: 1; transform: translate(-50%, 0) scale(1.5); }
+    100% { opacity: 0; transform: translate(-50%, 0) scale(1.9); }
+}
+.float-num.boom-num { color: #fb923c; font-size: 38px; }
+
+@media (max-width: 500px) {
+    .gun-anim { width: 48px; height: 48px; bottom: 30%; }
+    .gun-inner .icon-emoji { font-size: 36px; }
+    .gun-anim.me { right: -16px; }
+    .gun-anim.rival { left: -16px; }
+    #notifBtn { width: 42px; height: 42px; font-size: 20px; }
+}
