@@ -155,10 +155,50 @@
                     </section>
 
                     <!-- ===== GUERRA ===== -->
+                                        <!-- ===== GUERRA ===== -->
                     <section id="tab-guerra" class="tab">
                         <h2>Guerra</h2>
-                        <div class="placeholder">🖼️ Acá irá la imagen de guerra</div>
-                        <p class="muted">Próximamente.</p>
+                        <!-- El texto con el costo y el premio lo completa script.js -->
+                        <p class="muted" id="warInfo"></p>
+
+                        <!-- Arena: tu tarjeta | VS | tarjeta del rival -->
+                        <div id="arena">
+
+                            <!-- Tu personaje -->
+                            <div class="fighter" id="fighterMe">
+                                <div class="f-avatar">?</div>
+                                <div class="f-name">---</div>
+                                <div class="f-sub"></div>
+                                <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                <div class="f-hp-text">0/0</div>
+                                <div class="f-stats"></div>
+                            </div>
+
+                            <div class="vs">VS</div>
+
+                            <!-- Rival (empieza vacío hasta que busques uno) -->
+                            <div class="fighter empty" id="fighterRival">
+                                <div class="f-avatar">?</div>
+                                <div class="f-name">Sin rival</div>
+                                <div class="f-sub"></div>
+                                <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                <div class="f-hp-text">-</div>
+                                <div class="f-stats"></div>
+                            </div>
+                        </div>
+
+                        <!-- Cartel de estado: "Comienza el combate", "Turno extra", resultado... -->
+                        <div id="warBanner" hidden></div>
+
+                        <!-- Botones: buscar rival / pelear -->
+                        <div id="warActions">
+                            <button id="searchRivalBtn" class="action-btn" type="button">🔍 Buscar rival</button>
+                            <button id="fightBtn" class="action-btn danger" type="button" hidden>⚔️ Pelear</button>
+                        </div>
+                        <p id="warMsg" class="muted"></p>
+
+                        <h3>Registro del combate</h3>
+                        <div id="warLog"></div>
                     </section>
 
                     <!-- ===== CLAN ===== -->
