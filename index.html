@@ -78,14 +78,21 @@
 
                         <!-- Botón de editar perfil + panel que se abre/cierra -->
                         <button id="editProfileBtn" class="action-btn full" type="button">✏️ Editar perfil</button>
-                        <div id="editProfile" hidden>
-                            <label>Nombre de usuario
-                                <input id="editName" type="text" disabled>
-                            </label>
+                             <div id="editProfile" hidden>
+                            <!-- Cambiar nombre de usuario (es también el nombre para iniciar sesión) -->
+                            <form id="editNameForm">
+                                <label>Nombre de usuario
+                                    <input id="editName" type="text" maxlength="20" autocomplete="off">
+                                </label>
+                                <button type="submit" id="editNameBtn" class="action-btn full">Guardar nombre</button>
+                            </form>
+                            <p class="muted" id="editNameHint"></p>
+                            <p class="muted" id="editMsg"></p>
+
                             <label>Foto de perfil
                                 <input type="file" accept="image/*" disabled>
                             </label>
-                            <p class="muted">🚧 Próximamente: todavía no se pueden guardar cambios.</p>
+                            <p class="muted">🚧 La foto de perfil llegará próximamente.</p>
                         </div>
                     </div>
 
@@ -156,6 +163,7 @@
 
                     <!-- ===== GUERRA ===== -->
                                         <!-- ===== GUERRA ===== -->
+                                       <!-- ===== GUERRA ===== -->
                     <section id="tab-guerra" class="tab">
                         <h2>Guerra</h2>
                         <!-- El texto con el costo y el premio lo completa script.js -->
@@ -187,6 +195,9 @@
                             </div>
                         </div>
 
+                        <!-- Diferencia de nivel y premio del rival encontrado -->
+                        <p id="rivalNote" class="muted"></p>
+
                         <!-- Cartel de estado: "Comienza el combate", "Turno extra", resultado... -->
                         <div id="warBanner" hidden></div>
 
@@ -195,6 +206,8 @@
                             <button id="searchRivalBtn" class="action-btn" type="button">🔍 Buscar rival</button>
                             <button id="fightBtn" class="action-btn danger" type="button" hidden>⚔️ Pelear</button>
                         </div>
+                        <!-- Cargas de búsqueda y cuenta regresiva -->
+                        <p id="searchInfo" class="muted"></p>
                         <p id="warMsg" class="muted"></p>
 
                         <h3>Registro del combate</h3>
@@ -203,6 +216,7 @@
 
                     <!-- ===== CLAN ===== -->
                                        <!-- ===== CLAN ===== -->
+                                        <!-- ===== CLAN (FAMILIA) ===== -->
                     <section id="tab-clan" class="tab">
                         <h2>Clan</h2>
 
@@ -216,10 +230,17 @@
                                 </div>
                             </div>
 
-                            <!-- Subpestañas del clan: Miembros / Chat -->
+                            <!-- Cambiar el nombre del clan (solo lo ve el líder) -->
+                            <form id="renameClanForm" class="inline-form" hidden>
+                                <input id="renameClanInput" type="text" maxlength="20" placeholder="Nuevo nombre del clan" autocomplete="off">
+                                <button type="submit" class="action-btn">Cambiar nombre</button>
+                            </form>
+
+                            <!-- Subpestañas del clan: Miembros / Chat / Reglas -->
                             <div class="sub-tabs">
                                 <button class="sub-tab active" data-clanpane="miembros" type="button">👥 Miembros</button>
                                 <button class="sub-tab" data-clanpane="chat" type="button">💬 Chat del clan</button>
+                                <button class="sub-tab" data-clanpane="reglas" type="button">📜 Reglas</button>
                             </div>
 
                             <!-- Subpestaña 1: lista de miembros -->
@@ -243,6 +264,18 @@
                                 <form id="clanChatForm" class="inline-form">
                                     <input id="clanChatInput" type="text" maxlength="200" placeholder="Escribile a tu clan..." autocomplete="off">
                                     <button type="submit" class="action-btn">Enviar</button>
+                                </form>
+                            </div>
+
+                            <!-- Subpestaña 3: reglas de la familia -->
+                            <div id="clanPane-reglas" class="clan-pane">
+                                <!-- Lo ven los miembros que NO pueden editar -->
+                                <div id="rulesView"></div>
+                                <!-- Lo ven el líder y los colíderes -->
+                                <form id="rulesForm" hidden>
+                                    <textarea id="rulesInput" maxlength="1000" placeholder="Escribí las reglas de tu familia..."></textarea>
+                                    <div class="rules-count" id="rulesCount">0/1000</div>
+                                    <button type="submit" class="action-btn">Guardar reglas</button>
                                 </form>
                             </div>
                         </div>
