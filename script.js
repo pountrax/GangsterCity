@@ -1,8 +1,8 @@
 // ============================================================
 // script.js — Lo que corre en el NAVEGADOR del jugador
-// Muestra el login, el panel del personaje, el menú, las misiones,
-// el inventario con estadísticas, la guerra, los clanes, los rankings
-// y el chat global.
+// Muestra el login, el panel del personaje (con cambio de nombre), el menú,
+// las misiones, el inventario con estadísticas, la guerra, los clanes
+// (miembros, rangos, chat y reglas), los rankings y el chat global.
 // NO calcula nada del juego: solo pide cosas al servidor (server.js)
 // y muestra lo que el servidor devuelve.
 // ============================================================
@@ -33,7 +33,10 @@ const fameValue = document.getElementById('fameValue');
 const scoreValue = document.getElementById('scoreValue');
 const editProfileBtn = document.getElementById('editProfileBtn');
 const editProfile = document.getElementById('editProfile');
+const editNameForm = document.getElementById('editNameForm');
 const editName = document.getElementById('editName');
+const editNameHint = document.getElementById('editNameHint');
+const editMsg = document.getElementById('editMsg');
 
 // Conectamos al servidor que está en Render.
 const socket = io('https://gangstercity.onrender.com');
@@ -59,9 +62,10 @@ try { inputUser.value = localStorage.getItem('lastUser') || ''; } catch (e) {}
 // ============================================================
 
 // Le pide al servidor que valide usuario y contraseña. Devuelve una "promesa".
-function login(creds) {
+// "extra" permite mandar datos adicionales (por ejemplo { noCreate: true } al reconectar).
+function login(creds, extra = {}) {
     return new Promise((resolve) => {
-        socket.emit('auth', creds, resolve);
+        socket.emit('auth', { ...creds, ...extra }, resolve);
     });
 }
 
@@ -98,8 +102,24 @@ form.addEventListener('submit', async (e) => {
 });
 
 // Si se corta la conexión y el navegador reconecta solo, volvemos a loguearnos.
+// "noCreate" evita que el servidor cree una cuenta nueva por error.
 socket.on('connect', async () => {
-    if (credentials) await login(credentials);
+    if (!credentials) return;
+    for (let i = 0; i < 6; i++) {
+        const res = await login(credentials, { noCreate: true });
+        if (res.ok) return;
+        // Si el servidor todavía cree que seguimos conectados, esperamos 3 segundos y reintentamos.
+        if (res.code === 'online' && i < 5) {
+            await new Promise((r) => setTimeout(r, 3000));
+            continue;
+        }
+        // Cualquier otro problema: volvemos a la pantalla de login con el motivo.
+        credentials = null;
+        gameBox.hidden = true;
+        loginBox.hidden = false;
+        loginError.textContent = res.error;
+        return;
+    }
 });
 
 // ============================================================
@@ -126,11 +146,29 @@ function confirmButton(btn, label, confirmLabel, onConfirm) {
 }
 
 // ============================================================
-// EDITAR PERFIL (por ahora solo abre y cierra el panel)
+// EDITAR PERFIL
 // ============================================================
 editProfileBtn.addEventListener('click', () => {
     editProfile.hidden = !editProfile.hidden; // mostrar u ocultar.
     editProfileBtn.textContent = editProfile.hidden ? '✏️ Editar perfil' : '✖ Cerrar edición';
+});
+
+// Guardar el nuevo nombre de usuario.
+editNameForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    editMsg.textContent = '';
+    socket.emit('changeName', editName.value, (res) => {
+        if (!res.ok) { editMsg.textContent = '⚠️ ' + res.error; return; }
+
+        // El nombre también es el de inicio de sesión: actualizamos todo lo que lo usa.
+        myName = res.name;
+        if (credentials) credentials.name = res.name; // para que al reconectar entre con el nombre nuevo.
+        try { localStorage.setItem('lastUser', res.name); } catch (err) {}
+        nameValue.textContent = myName;
+        editName.value = myName;
+        avatar.textContent = myName.charAt(0).toUpperCase();
+        editMsg.textContent = '✅ Nombre cambiado. Desde ahora iniciás sesión con ese nombre.';
+    });
 });
 
 // ============================================================
@@ -300,7 +338,7 @@ function buildStatsPanel(list) {
         const row = document.createElement('div');
         row.className = 'stat-row';
 
-        // Nombre y, debajo, el efecto real (lo calcula el servidor).
+        // Nombre y, debajo, el efecto real (lo calcula el servidor según tu nivel).
         const info = document.createElement('div');
         info.className = 'stat-info';
         const label = document.createElement('span');
@@ -424,6 +462,8 @@ const fightBtn = document.getElementById('fightBtn');
 const warBanner = document.getElementById('warBanner');
 const warMsg = document.getElementById('warMsg');
 const warLog = document.getElementById('warLog');
+const rivalNote = document.getElementById('rivalNote');   // diferencia de nivel y premio.
+const searchInfo = document.getElementById('searchInfo'); // cargas de búsqueda.
 
 // Junta las partes de una tarjeta para poder actualizarlas fácil.
 function fighterParts(id) {
@@ -449,6 +489,8 @@ let showingResult = false;           // true después de una pelea, hasta la pr�
 let rivalInfo = null;                // datos del rival actual.
 let fightMax = { me: 0, rival: 0 };  // vida máxima de cada uno en la pelea actual.
 let bannerTimer = null;
+let searchPending = false;           // true mientras esperamos la respuesta de "buscar rival".
+let fightPending = false;            // true mientras esperamos la respuesta de "pelear".
 
 // Reinicia una animación CSS: saca la clase, fuerza al navegador a "olvidarla" y la vuelve a poner.
 function playAnim(el, cls, ms) {
@@ -533,9 +575,22 @@ function renderRivalCard(r) {
     setHp('rival', r.maxHp, r.maxHp);
 }
 
+// Texto debajo de la arena: diferencia de nivel con el rival y premio si ganás.
+function showRivalNote(r) {
+    const n = Math.abs(r.levelDiff);
+    const lv = n === 1 ? 'nivel' : 'niveles';
+    const diff = r.levelDiff === 0 ? 'Tiene tu mismo nivel'
+        : r.levelDiff > 0 ? `Está ${n} ${lv} por encima tuyo`
+        : `Está ${n} ${lv} por debajo tuyo`;
+    let text = `${diff}. Premio si ganás: 💵 ${r.reward}.`;
+    if (r.expanded) text += ' ℹ️ No había nadie cerca de tu nivel, así que se amplió la búsqueda.';
+    rivalNote.textContent = text;
+}
+
 // Tarjeta del rival vacía (cuando todavía no buscaste a nadie).
 function clearRival() {
     rivalInfo = null;
+    rivalNote.textContent = '';
     fRival.root.classList.add('empty');
     fRival.avatar.textContent = '?';
     fRival.name.textContent = 'Sin rival';
@@ -546,14 +601,31 @@ function clearRival() {
     fRival.hpText.textContent = '-';
 }
 
-// Muestra u oculta los botones según el estado de la guerra.
+// Formato de cuenta regresiva: 9:05
+function fmtClock(ms) {
+    const total = Math.max(0, Math.ceil(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+// Muestra u oculta los botones según el estado de la guerra, y las cargas de búsqueda.
 function updateWarButtons() {
     searchRivalBtn.hidden = warState === 'fighting';
     fightBtn.hidden = warState !== 'found';
+
+    if (lastState && gameConfig) {
+        const left = lastState.searchCharges;
+        const max = lastState.searchMax;
+        searchRivalBtn.textContent = `🔍 Buscar rival (${left}/${max})`;
+        searchRivalBtn.disabled = searchPending || left < 1;
+        searchInfo.textContent = left < 1
+            ? `⏳ Sin búsquedas. Se recargan las ${max} en ${fmtClock(lastState.searchRechargeMs)}.`
+            : `Búsquedas disponibles: ${left}/${max}. Al gastar la última, esperás ${Math.round(gameConfig.searchRechargeMs / 60000)} minutos para recuperar las ${max}.`;
+    }
+
     if (warState === 'found' && gameConfig) {
         const cost = gameConfig.warEnergy;
         const enough = lastState && lastState.energy >= cost;
-        fightBtn.disabled = !enough;
+        fightBtn.disabled = fightPending || !enough;
         fightBtn.textContent = enough ? `⚔️ Pelear (-${cost} ⚡)` : `⚔️ Pelear (necesitás ${cost} ⚡)`;
     }
 }
@@ -562,6 +634,8 @@ function updateWarButtons() {
 function resetWar() {
     warState = 'idle';
     showingResult = false;
+    searchPending = false;
+    fightPending = false;
     clearWarFx();
     clearRival();
     warLog.innerHTML = '';
@@ -574,10 +648,11 @@ function resetWar() {
 // ----- Buscar rival -----
 searchRivalBtn.addEventListener('click', () => {
     warMsg.textContent = '';
-    searchRivalBtn.disabled = true;
+    searchPending = true;
+    updateWarButtons();
     socket.emit('searchRival', (res) => {
-        searchRivalBtn.disabled = false;
-        if (!res.ok) { warMsg.textContent = '⚠️ ' + res.error; return; }
+        searchPending = false;
+        if (!res.ok) { warMsg.textContent = '⚠️ ' + res.error; updateWarButtons(); return; }
 
         // Rival encontrado: limpiamos lo de la pelea anterior y mostramos su tarjeta.
         warState = 'found';
@@ -586,6 +661,7 @@ searchRivalBtn.addEventListener('click', () => {
         warBanner.hidden = true;
         warLog.innerHTML = '';
         renderRivalCard(res.rival);
+        showRivalNote(res.rival);
         renderMyCard();           // reinicia tu barra de vida.
         updateWarButtons();
     });
@@ -594,8 +670,10 @@ searchRivalBtn.addEventListener('click', () => {
 // ----- Pelear -----
 fightBtn.addEventListener('click', () => {
     warMsg.textContent = '';
-    fightBtn.disabled = true;
+    fightPending = true;
+    updateWarButtons();
     socket.emit('startFight', (res) => {
+        fightPending = false;
         if (!res.ok) { warMsg.textContent = '⚠️ ' + res.error; updateWarButtons(); return; }
 
         // La pelea arrancó: las barras empiezan llenas y esperamos los golpes del servidor.
@@ -676,6 +754,7 @@ socket.on('warEnd', ({ result, reward, rivalName }) => {
         showBanner('🤝 Empate', '');
         addWarLog('🤝 La pelea terminó en empate.', 'l-sys');
     }
+    rivalNote.textContent = ''; // ya se peleó: el premio de ese rival no aplica más.
     updateWarButtons();
 });
 
@@ -768,13 +847,28 @@ const joinClanBox = document.getElementById('joinClanBox');
 const joinClanReq = document.getElementById('joinClanReq');
 const clanJoinList = document.getElementById('clanJoinList');
 const clanMsg = document.getElementById('clanMsg');
+const renameClanForm = document.getElementById('renameClanForm');
+const renameClanInput = document.getElementById('renameClanInput');
+const rulesView = document.getElementById('rulesView');
+const rulesForm = document.getElementById('rulesForm');
+const rulesInput = document.getElementById('rulesInput');
+const rulesCount = document.getElementById('rulesCount');
 
-// Icono y nombre de cada rango. El líder lleva el sombrero 🎩.
-const ROLE_ICONS = { lider: '🎩', oficial: '⭐', miembro: '👤' };
-const ROLE_LABELS = { lider: 'Líder', oficial: 'Oficial', miembro: 'Miembro' };
+// Icono y nombre de cada rango. El líder lleva el sombrero 🎩 y el colíder los lentes 🕶️.
+const ROLE_ICONS = { lider: '🎩', colider: '🕶️', oficial: '⭐', miembro: '👤' };
+const ROLE_LABELS = { lider: 'Líder', colider: 'Colíder', oficial: 'Oficial', miembro: 'Miembro' };
 
 let myClanInfo = null;    // datos de mi clan (null si no tengo).
 let lastClanName;         // para detectar cuándo cambia mi clan.
+let rulesDirty = false;   // true si estoy escribiendo reglas sin guardar (para no pisarlas).
+
+// ¿Puede alguien con el rango "actor" gestionar a alguien con el rango "target"?
+// (Es solo para mostrar u ocultar botones: el servidor lo verifica de nuevo.)
+function canManageClient(actor, target) {
+    if (actor === 'lider') return target !== 'lider';
+    if (actor === 'colider') return target === 'miembro' || target === 'oficial';
+    return false;
+}
 
 // Le pide al servidor los datos de MI clan y redibuja la pestaña.
 function loadMyClan() {
@@ -799,20 +893,19 @@ function updateClanButtons() {
     document.querySelectorAll('.join-btn').forEach((b) => { b.disabled = !canJoin; });
 }
 
-// Pide al servidor cambiar el rango de un miembro ('oficial' o 'miembro').
-function setRole(key, role) {
+// Pide al servidor cambiar el rango de un miembro ('miembro', 'oficial' o 'colider').
+function setRole(key, role, name) {
     clanMsg.textContent = '';
     socket.emit('setMemberRole', { key, role }, (res) => {
-        if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
-        clanMsg.textContent = role === 'oficial' ? '✅ Miembro ascendido a Oficial.' : '✅ Oficial degradado a Miembro.';
-        loadMyClan();
+        if (!res.ok) clanMsg.textContent = '⚠️ ' + res.error;
+        else clanMsg.textContent = `✅ ${name} ahora es ${ROLE_LABELS[role]}.`;
+        loadMyClan(); // en ambos casos refrescamos (si falló, el desplegable vuelve a su valor).
     });
 }
 
-// Dibuja la lista de miembros: una fila por miembro, con botones si soy el líder.
+// Dibuja la lista de miembros: una fila por miembro, con controles según mi rango.
 function renderMembers(members, myRole) {
     clanMembers.innerHTML = '';
-    const iAmLeader = myRole === 'lider';
 
     members.forEach((m) => {
         const row = document.createElement('div');
@@ -844,23 +937,25 @@ function renderMembers(members, myRole) {
 
         row.append(nameBox, level, tag);
 
-        // Botones SOLO si soy el líder y esta fila no es la del líder.
-        // (El servidor vuelve a verificarlo: esto es solo para mostrar u ocultar.)
-        if (iAmLeader && m.role !== 'lider') {
+        // Controles SOLO si mi rango me permite gestionar a este miembro.
+        if (canManageClient(myRole, m.role)) {
             const actions = document.createElement('div');
             actions.className = 'member-actions';
 
-            const roleBtn = document.createElement('button');
-            roleBtn.type = 'button';
-            roleBtn.className = 'action-btn small';
-            if (m.role === 'oficial') {
-                roleBtn.classList.add('neutral');
-                roleBtn.textContent = '⬇ Degradar';
-                roleBtn.addEventListener('click', () => setRole(m.key, 'miembro'));
-            } else {
-                roleBtn.textContent = '⬆ Ascender';
-                roleBtn.addEventListener('click', () => setRole(m.key, 'oficial'));
-            }
+            // Desplegable de rango: el líder puede elegir Miembro, Oficial o Colíder;
+            // el colíder solo Miembro u Oficial.
+            const select = document.createElement('select');
+            select.className = 'role-select';
+            select.title = 'Cambiar rango';
+            const options = myRole === 'lider' ? ['miembro', 'oficial', 'colider'] : ['miembro', 'oficial'];
+            options.forEach((r) => {
+                const opt = document.createElement('option');
+                opt.value = r;
+                opt.textContent = `${ROLE_ICONS[r]} ${ROLE_LABELS[r]}`;
+                if (r === m.role) opt.selected = true;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', () => setRole(m.key, select.value, m.name));
 
             // Expulsar pide confirmar con un segundo toque.
             const kickBtn = document.createElement('button');
@@ -875,12 +970,30 @@ function renderMembers(members, myRole) {
                 });
             });
 
-            actions.append(roleBtn, kickBtn);
+            actions.append(select, kickBtn);
             row.appendChild(actions);
         }
 
         clanMembers.appendChild(row);
     });
+}
+
+// Dibuja la pestaña de reglas: editor para líder y colíderes, solo lectura para el resto.
+function renderRules(clan) {
+    const canEdit = clan.myRole === 'lider' || clan.myRole === 'colider';
+    rulesForm.hidden = !canEdit;
+    rulesView.hidden = canEdit;
+
+    if (canEdit) {
+        // No pisamos lo que la persona está escribiendo.
+        if (!rulesDirty) {
+            rulesInput.value = clan.rules;
+            rulesCount.textContent = `${clan.rules.length}/${gameConfig ? gameConfig.clanRulesMax : 1000}`;
+        }
+    } else {
+        rulesView.textContent = clan.rules || 'El líder todavía no escribió las reglas del clan.';
+        rulesView.classList.toggle('empty', !clan.rules);
+    }
 }
 
 // Dibuja la pestaña Clan completa.
@@ -895,8 +1008,15 @@ function renderClanTab() {
         clanNameEl.textContent = myClanInfo.name;
         clanInfo.textContent = `${myClanInfo.members.length} miembro(s)`;
         myRoleValue.textContent = `${ROLE_ICONS[myClanInfo.myRole]} ${ROLE_LABELS[myClanInfo.myRole]}`;
+
+        // Cambiar el nombre del clan: solo el líder ve el formulario.
+        renameClanForm.hidden = myClanInfo.myRole !== 'lider';
+        if (document.activeElement !== renameClanInput) renameClanInput.value = myClanInfo.name;
+
         renderMembers(myClanInfo.members, myClanInfo.myRole);
+        renderRules(myClanInfo);
     } else {
+        rulesDirty = false;
         // Lista de clanes para unirse (sale del ranking de clanes).
         clanJoinList.innerHTML = '';
         if (!clanRankingData.length) {
@@ -950,6 +1070,35 @@ createClanForm.addEventListener('submit', (e) => {
     });
 });
 
+// Cambiar el nombre del clan (solo el líder; el servidor lo vuelve a verificar).
+renameClanForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    clanMsg.textContent = '';
+    socket.emit('renameClan', renameClanInput.value, (res) => {
+        if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
+        clanMsg.textContent = `✅ El clan ahora se llama ${res.name}.`;
+        loadMyClan();
+    });
+});
+
+// Reglas: contador de caracteres y marca de "tengo cambios sin guardar".
+rulesInput.addEventListener('input', () => {
+    rulesDirty = true;
+    rulesCount.textContent = `${rulesInput.value.length}/${gameConfig ? gameConfig.clanRulesMax : 1000}`;
+});
+
+// Guardar las reglas (líder y colíderes).
+rulesForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    clanMsg.textContent = '';
+    socket.emit('setClanRules', rulesInput.value, (res) => {
+        if (!res.ok) { clanMsg.textContent = '⚠️ ' + res.error; return; }
+        rulesDirty = false;
+        clanMsg.textContent = '✅ Reglas guardadas.';
+        loadMyClan();
+    });
+});
+
 // Salir del clan (con confirmación de dos toques).
 confirmButton(leaveClanBtn, 'Salir del clan', '¿Seguro? Tocá de nuevo', () => {
     socket.emit('leaveClan', (res) => {
@@ -959,7 +1108,7 @@ confirmButton(leaveClanBtn, 'Salir del clan', '¿Seguro? Tocá de nuevo', () => 
     });
 });
 
-// ---------- Subpestañas del clan (Miembros / Chat) ----------
+// ---------- Subpestañas del clan (Miembros / Chat / Reglas) ----------
 const subTabs = document.querySelectorAll('.sub-tab');
 const clanPanes = document.querySelectorAll('.clan-pane');
 const clanChatLog = document.getElementById('clanChatLog');
@@ -1000,7 +1149,7 @@ clanChatForm.addEventListener('submit', (e) => {
     clanChatInput.focus();
 });
 
-// Algo cambió en mi clan (alguien entró, salió, fue expulsado o ascendido): refrescamos.
+// Algo cambió en mi clan (alguien entró, salió, cambió de rango, nuevas reglas...): refrescamos.
 socket.on('clanChanged', loadMyClan);
 
 // Avisos que me manda el servidor (por ejemplo "Fuiste expulsado del clan X").
@@ -1019,7 +1168,11 @@ socket.on('config', (cfg) => {
     if (cfg.chatTtlMs) chatTtlMs = cfg.chatTtlMs;
     buildStatsPanel(cfg.stats);
     warInfo.textContent =
-        `Buscá un rival al azar entre los jugadores (gratis). Pelear cuesta ⚡ ${cfg.warEnergy} y, si ganás, recibís 💵 ${cfg.warReward}.`;
+        `Buscá un rival de nivel parecido (si no hay, se amplía la búsqueda). Pelear cuesta ⚡ ${cfg.warEnergy}. ` +
+        `El premio base es 💵 ${cfg.warReward} y sube o baja según la diferencia de nivel con tu rival.`;
+    editNameHint.textContent =
+        `Podés cambiarlo cada ${Math.round(cfg.nameCooldownMs / 60000)} minutos. Es también tu nombre para iniciar sesión.`;
+    rulesInput.maxLength = cfg.clanRulesMax;
     resetWar();           // si había una pelea a medias antes de reconectar, la limpiamos.
     updateClanButtons();
     loadClanChat();       // también al reconectar, para no perder mensajes del clan.
@@ -1074,9 +1227,9 @@ function renderState(s) {
     updateMissionButtons();
     updateClanButtons();
     renderMyCard();        // tarjeta de Guerra con tus datos actuales.
-    updateWarButtons();    // habilita o no el botón de pelear según tu energía.
+    updateWarButtons();    // cargas de búsqueda y botón de pelear.
 
-    // Si cambió mi clan (entré, salí, me expulsaron o recién cargó), pedimos los datos del clan y su chat.
+    // Si cambió mi clan (entré, salí, me expulsaron, renombraron o recién cargó), pedimos sus datos y su chat.
     if (s.clan !== lastClanName) {
         lastClanName = s.clan;
         loadMyClan();
