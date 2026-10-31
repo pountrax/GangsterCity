@@ -43,7 +43,12 @@
                     <div id="notifList"></div>
                 </div>
             </div>
-
+                     <!-- Aviso de guerra de clanes (visible en cualquier pestaña) -->
+            <div id="clanWarAlert" hidden>
+                <span id="clanWarAlertText"></span>
+                <button id="clanWarAlertBtn" type="button"></button>
+                <button id="clanWarAlertClose" type="button" title="Cerrar">✖</button>
+            </div>
             <!-- #layout: dos columnas (izquierda: personaje y menú / derecha: contenido) -->
             <div id="layout">
 
@@ -127,8 +132,17 @@
                 <main id="content" class="panel">
 
                     <!-- ===== MISIONES ===== -->
+                                       <!-- ===== MISIONES ===== -->
                     <section id="tab-misiones" class="tab active">
                         <h2>Misiones</h2>
+
+                        <!-- Bolsa de dinero: ganancias de gangster -->
+                        <div id="pouchRow">
+                            <button id="pouchBtn" type="button" title="Reclamar tus ganancias">💰 <span id="pouchValue">0</span></button>
+                            <p id="pouchText"></p>
+                        </div>
+                        <p id="pouchMsg" class="muted"></p>
+
                         <div class="placeholder">🖼️ Acá irá la imagen de misiones</div>
 
                         <div id="missionActive" hidden>
@@ -158,6 +172,11 @@
                                 </div>
                                 <div id="statsList"></div>
                                 <p id="statsMsg" class="muted"></p>
+                                                                 <!-- Reiniciar estadísticas -->
+                                <div class="reset-row">
+                                    <button id="resetStatsBtn" class="action-btn" type="button">🔄 Reiniciar estadísticas</button>
+                                    <p class="muted" id="resetInfo"></p>
+                                </div>
                             </div>
                         </div>
 
@@ -271,6 +290,7 @@
                                 <button class="sub-tab active" data-clanpane="miembros" type="button">👥 Miembros</button>
                                 <button class="sub-tab" data-clanpane="chat" type="button">💬 Chat del clan</button>
                                 <button class="sub-tab" data-clanpane="reglas" type="button">📜 Reglas</button>
+                                <button class="sub-tab" data-clanpane="guerra" type="button">⚔️ Guerra de clan</button>
                             </div>
 
                             <div id="clanPane-miembros" class="clan-pane active">
@@ -301,6 +321,73 @@
                                     <div class="rules-count" id="rulesCount">0/1000</div>
                                     <button type="submit" class="action-btn">Guardar reglas</button>
                                 </form>
+                            </div>
+                                                         <!-- Subpestaña 4: guerra de clan -->
+                            <div id="clanPane-guerra" class="clan-pane">
+
+                                <!-- Lista: elegir clan rival e historial -->
+                                <div id="cwListBox">
+                                    <p class="muted" id="cwInfo"></p>
+
+                                    <!-- Cuenta regresiva (solo aparece si hay una guerra preparándose) -->
+                                    <div id="cwPrepBox" hidden></div>
+
+                                    <div id="cwAttackBox">
+                                        <h3>Elegir clan rival</h3>
+                                        <p class="muted" id="cwCanDeclare"></p>
+                                        <table class="simple-table">
+                                            <thead><tr><th>Clan</th><th>Miembros</th><th>Fama</th><th></th></tr></thead>
+                                            <tbody id="cwCandidates"></tbody>
+                                        </table>
+                                    </div>
+
+                                    <h3>Guerras anteriores</h3>
+                                    <div id="cwHistory"></div>
+                                    <p id="cwMsg" class="muted"></p>
+                                </div>
+
+                                <!-- Repetición de la guerra -->
+                                <div id="cwReplay" hidden>
+                                    <div class="cw-head">
+                                        <button id="cwBack" class="action-btn small neutral" type="button">← Volver</button>
+                                        <strong id="cwTitle"></strong>
+                                    </div>
+
+                                    <!-- Los dos equipos: una ficha por miembro (se apagan al caer) -->
+                                    <div class="cw-rosters">
+                                        <div><div class="cw-rname" id="cwNameA"></div><div class="roster" id="cwRosterA"></div></div>
+                                        <div><div class="cw-rname" id="cwNameB"></div><div class="roster" id="cwRosterB"></div></div>
+                                    </div>
+
+                                    <!-- Duelo actual -->
+                                    <div id="cwArena">
+                                        <div class="fighter empty" id="cwLeft">
+                                            <div class="f-avatar">?</div>
+                                            <div class="f-name">---</div>
+                                            <div class="f-sub"></div>
+                                            <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                            <div class="f-hp-text">-</div>
+                                            <div class="f-stats"></div>
+                                        </div>
+                                        <div class="vs">VS</div>
+                                        <div class="fighter empty" id="cwRight">
+                                            <div class="f-avatar">?</div>
+                                            <div class="f-name">---</div>
+                                            <div class="f-sub"></div>
+                                            <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                            <div class="f-hp-text">-</div>
+                                            <div class="f-stats"></div>
+                                        </div>
+                                    </div>
+
+                                    <div id="cwBanner" hidden></div>
+                                    <div class="cw-controls">
+                                        <button id="cwPause" class="action-btn small" type="button">⏸ Pausa</button>
+                                        <button id="cwSpeed" class="action-btn small neutral" type="button">Velocidad x1</button>
+                                        <button id="cwSkip" class="action-btn small neutral" type="button">⏭ Saltar al final</button>
+                                    </div>
+                                    <div id="cwLog"></div>
+                                </div>
                             </div>
                         </div>
 
