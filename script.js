@@ -1,9 +1,10 @@
 // ============================================================
 // script.js — Lo que corre en el NAVEGADOR del jugador
-// Muestra el login, el panel del personaje, el menú, las misiones,
-// el inventario (estadísticas, mochila y maletín con arrastrar y soltar),
-// la tienda, la guerra (con armas animadas y búsqueda por nombre),
-// las notificaciones, los clanes, los rankings y el chat global.
+// Muestra el login, el panel del personaje, el menú, las misiones (con la
+// bolsa de dinero), el inventario (estadísticas con reinicio, mochila y maletín),
+// la tienda, la guerra (con armas animadas), las notificaciones, los clanes
+// (miembros, rangos, chat, reglas y GUERRA DE CLANES con repetición),
+// los rankings y el chat global.
 // NO calcula nada del juego: solo pide cosas al servidor (server.js)
 // y muestra lo que el servidor devuelve.
 // ============================================================
@@ -44,27 +45,19 @@ const socket = io('https://gangstercity.onrender.com');
 
 // Usuario y contraseña, SOLO en memoria, para reconectar solos si se corta internet.
 let credentials = null;
-// Nombre del jugador logueado (sirve para resaltar su fila y sus mensajes).
-let myName = null;
-// Último estado personal que mandó el servidor (dinero, energía, nivel, etc.).
-let lastState = null;
-// Configuración del juego que manda el servidor (niveles de clan, costos, etc.).
-let gameConfig = null;
-// Lista de estadísticas (id, nombre, icono) que manda el servidor.
-let statsConfig = [];
-// Catálogo de objetos (id → { name, emoji, img, w, h... }) que manda el servidor.
-let itemsCatalog = {};
-// Cuánto dura un mensaje del chat global (el servidor lo confirma al entrar).
+let myName = null;          // nombre del jugador logueado.
+let lastState = null;       // último estado personal que mandó el servidor.
+let gameConfig = null;      // configuración del juego que manda el servidor.
+let statsConfig = [];       // lista de estadísticas (id, nombre, icono).
+let itemsCatalog = {};      // catálogo de objetos (id → { name, emoji, img, w, h... }).
 let chatTtlMs = 30 * 60 * 1000;
 
-// Recordamos el último usuario usado (la contraseña NO se recuerda).
 try { inputUser.value = localStorage.getItem('lastUser') || ''; } catch (e) {}
 
 // ============================================================
 // LOGIN
 // ============================================================
 
-// Le pide al servidor que valide usuario y contraseña. Devuelve una "promesa".
 // "extra" permite mandar datos adicionales (por ejemplo { noCreate: true } al reconectar).
 function login(creds, extra = {}) {
     return new Promise((resolve) => {
@@ -72,7 +65,6 @@ function login(creds, extra = {}) {
     });
 }
 
-// Se ejecuta al apretar "Entrar" (o Enter).
 form.addEventListener('submit', async (e) => {
     e.preventDefault();
 
@@ -91,7 +83,6 @@ form.addEventListener('submit', async (e) => {
         return;
     }
 
-    // Login exitoso:
     credentials = creds;
     myName = res.name;
     try { localStorage.setItem('lastUser', res.name); } catch (e) {}
@@ -104,8 +95,7 @@ form.addEventListener('submit', async (e) => {
     gameBox.hidden = false;
 });
 
-// Si se corta la conexión y el navegador reconecta solo, volvemos a loguearnos.
-// "noCreate" evita que el servidor cree una cuenta nueva por error.
+// Si se corta la conexión y el navegador reconecta solo, volvemos a loguearnos ("noCreate": nunca crea cuentas).
 socket.on('connect', async () => {
     if (!credentials) return;
     for (let i = 0; i < 6; i++) {
@@ -147,24 +137,18 @@ function confirmButton(btn, label, confirmLabel, onConfirm) {
 // ============================================================
 // FORMATOS DE TIEMPO
 // ============================================================
-
-// 9:05 (minutos:segundos)
-function fmtClock(ms) {
+function fmtClock(ms) {            // 9:05
     const total = Math.max(0, Math.ceil(ms / 1000));
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
-
-// "3 h 20 min" o "45 min"
-function fmtHM(ms) {
+function fmtHM(ms) {               // "3 h 20 min" o "45 min"
     const m = Math.max(1, Math.ceil(ms / 60000));
     const h = Math.floor(m / 60);
     return h > 0 ? `${h} h ${m % 60} min` : `${m} min`;
 }
 
 // ============================================================
-// ICONOS DE OBJETOS
-// Muestra el emoji; si existe la imagen del objeto (carpeta img/items/),
-// la reemplaza apenas termina de cargar. Si la imagen no existe, queda el emoji.
+// ICONOS DE OBJETOS (emoji; si existe la imagen en img/items/, la reemplaza al cargar)
 // ============================================================
 function makeIcon(def) {
     const wrap = document.createElement('span');
@@ -191,7 +175,6 @@ editProfileBtn.addEventListener('click', () => {
     editProfileBtn.textContent = editProfile.hidden ? '✏️ Editar perfil' : '✖ Cerrar edición';
 });
 
-// Guardar el nuevo nombre de usuario.
 editNameForm.addEventListener('submit', (e) => {
     e.preventDefault();
     editMsg.textContent = '';
@@ -208,7 +191,7 @@ editNameForm.addEventListener('submit', (e) => {
 });
 
 // ============================================================
-// NAVEGACIÓN ENTRE SECCIONES (Misiones / Inventario / Guerra / Tienda / Clan)
+// NAVEGACIÓN ENTRE SECCIONES
 // ============================================================
 const navButtons = document.querySelectorAll('.nav-btn');
 const tabs = document.querySelectorAll('.tab');
@@ -217,12 +200,9 @@ function showTab(name) {
     tabs.forEach((t) => t.classList.toggle('active', t.id === 'tab-' + name));
     navButtons.forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
     if (name === 'clan') loadMyClan();
-    if (name === 'inventario') renderCase(); // recalcula el tamaño de las casillas.
+    if (name === 'inventario') renderCase();
 }
-
-navButtons.forEach((b) => {
-    b.addEventListener('click', () => showTab(b.dataset.tab));
-});
+navButtons.forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
 // ============================================================
 // RANKINGS (con pestañas: Actividad / Clanes / Fama)
@@ -240,7 +220,6 @@ rankTabs.forEach((b) => {
     });
 });
 
-// Celda de nombre: con puntito verde si el jugador está conectado.
 function nameCell(p) {
     const span = document.createElement('span');
     if (p.online) {
@@ -253,7 +232,6 @@ function nameCell(p) {
     return span;
 }
 
-// Dibuja una tabla de ranking.
 function renderBoard(body, rows, getCells, isMine, emptyText, cols) {
     body.innerHTML = '';
     if (!rows.length) {
@@ -278,49 +256,35 @@ function renderBoard(body, rows, getCells, isMine, emptyText, cols) {
     });
 }
 
-// Ranking de ACTIVIDAD (llega cada segundo).
 socket.on('players', (players) => {
-    renderBoard(
-        scoreBody, players,
-        (p, i) => [i + 1, nameCell(p), p.score],
-        (p) => myName && p.name === myName,
-        'Todavía no hay jugadores.', 3
-    );
+    renderBoard(scoreBody, players, (p, i) => [i + 1, nameCell(p), p.score],
+        (p) => myName && p.name === myName, 'Todavía no hay jugadores.', 3);
     const mine = players.find((p) => p.name === myName);
     if (mine) scoreValue.textContent = mine.score;
 });
 
-// Ranking de FAMA (llega cada 10 segundos).
 socket.on('fameRanking', (rows) => {
-    renderBoard(
-        fameBoardBody, rows,
-        (p, i) => [i + 1, nameCell(p), p.level, p.fame],
-        (p) => myName && p.name === myName,
-        'Todavía no hay jugadores.', 4
-    );
+    renderBoard(fameBoardBody, rows, (p, i) => [i + 1, nameCell(p), p.level, p.fame],
+        (p) => myName && p.name === myName, 'Todavía no hay jugadores.', 4);
 });
 
-// Ranking de CLANES (llega cada 10 segundos).
 let clanRankingData = [];
 socket.on('clanRanking', (rows) => {
     clanRankingData = rows;
-    renderBoard(
-        clanBoardBody, rows,
-        (c, i) => [i + 1, c.name, c.members, c.fame],
-        (c) => lastState && lastState.clan && c.name === lastState.clan,
-        'Todavía no hay clanes.', 4
-    );
+    renderBoard(clanBoardBody, rows, (c, i) => [i + 1, c.name, c.members, c.fame],
+        (c) => lastState && lastState.clan && c.name === lastState.clan, 'Todavía no hay clanes.', 4);
     if (!myClanInfo) renderClanTab();
 });
 
 // ============================================================
-// ESTADÍSTICAS (Vida, Daño, Aguante, Velocidad, Inteligencia, Suerte)
-// Cada fila: nombre + efecto | valor (+ extra del maletín) | botón "+" | botón 💵
+// ESTADÍSTICAS (Vida, Daño, Aguante, Velocidad, Inteligencia, Suerte) + REINICIO
 // ============================================================
 const statsList = document.getElementById('statsList');
 const statsMsg = document.getElementById('statsMsg');
 const statPointsValue = document.getElementById('statPointsValue');
 const inventoryBadge = document.getElementById('inventoryBadge');
+const resetStatsBtn = document.getElementById('resetStatsBtn');
+const resetInfo = document.getElementById('resetInfo');
 
 let statRows = {};
 
@@ -361,9 +325,7 @@ function buildStatsPanel(list) {
         plus.disabled = true;
         plus.addEventListener('click', () => {
             statsMsg.textContent = '';
-            socket.emit('spendStat', s.id, (res) => {
-                if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error;
-            });
+            socket.emit('spendStat', s.id, (res) => { if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error; });
         });
 
         const buy = document.createElement('button');
@@ -374,9 +336,7 @@ function buildStatsPanel(list) {
         buy.disabled = true;
         buy.addEventListener('click', () => {
             statsMsg.textContent = '';
-            socket.emit('buyStat', s.id, (res) => {
-                if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error;
-            });
+            socket.emit('buyStat', s.id, (res) => { if (!res.ok) statsMsg.textContent = '⚠️ ' + res.error; });
         });
 
         row.append(info, value, plus, buy);
@@ -384,6 +344,35 @@ function buildStatsPanel(list) {
         statRows[s.id] = { value, effect, plus, buy };
     });
 }
+
+// ----- Reiniciar estadísticas (con confirmación de dos toques) -----
+let resetArmed = false;
+let resetTimer = null;
+
+// Pone el texto y el estado del botón según el precio actual (cada reinicio cuesta 500 más).
+function updateResetBtn() {
+    if (!lastState || resetArmed) return;
+    resetStatsBtn.textContent = `🔄 Reiniciar estadísticas · 💵 ${lastState.resetCost}`;
+    resetStatsBtn.disabled = lastState.money < lastState.resetCost;
+}
+
+resetStatsBtn.addEventListener('click', () => {
+    if (!resetArmed) {
+        resetArmed = true;
+        resetStatsBtn.textContent = '¿Seguro? Tocá de nuevo para confirmar';
+        resetTimer = setTimeout(() => { resetArmed = false; updateResetBtn(); }, 4000);
+        return;
+    }
+    clearTimeout(resetTimer);
+    resetArmed = false;
+    statsMsg.textContent = '';
+    socket.emit('resetStats', (res) => {
+        statsMsg.textContent = res.ok
+            ? `✅ Estadísticas reiniciadas (-💵 ${res.cost}). Tenés ${res.points} puntos para repartir.`
+            : '⚠️ ' + res.error;
+        updateResetBtn();
+    });
+});
 
 // ============================================================
 // INVENTARIO: SUBPESTAÑAS, MOCHILA Y MALETÍN DE GUERRA
@@ -399,13 +388,11 @@ const caseGrid = document.getElementById('caseGrid');
 const caseHint = document.getElementById('caseHint');
 const expandCaseBtn = document.getElementById('expandCaseBtn');
 
-let bagSlots = 20; // casillas de la mochila (el servidor lo confirma).
-// Lo último que mandó el servidor sobre mochila y maletín.
+let bagSlots = 20;
 let invData = { bag: [], briefcase: [], caseSize: 3, expanded: false };
-let caseCells = [];   // las casillas (div) del maletín, para pintarlas al arrastrar.
-let selected = null;  // objeto seleccionado: { from: 'bag', idx } o { from: 'case', uid }.
+let caseCells = [];
+let selected = null;  // { from: 'bag', idx } o { from: 'case', uid }.
 
-// Cambia entre "Inventario" (estadísticas) y "Maletín de guerra".
 function showInvPane(name) {
     invTabs.forEach((b) => b.classList.toggle('active', b.dataset.invpane === name));
     invPanes.forEach((p) => p.classList.toggle('active', p.id === 'invPane-' + name));
@@ -413,14 +400,12 @@ function showInvPane(name) {
 }
 invTabs.forEach((b) => b.addEventListener('click', () => showInvPane(b.dataset.invpane)));
 
-// Define el tamaño de una casilla del maletín en píxeles (se usa para el tamaño de los iconos).
 function setCellSize() {
     const w = caseGrid.clientWidth;
     if (w) caseGrid.style.setProperty('--cell', (w / invData.caseSize) + 'px');
 }
 window.addEventListener('resize', setCellSize);
 
-// Dibuja la mochila: una casilla por cada espacio.
 function renderBag() {
     bagGrid.innerHTML = '';
     for (let i = 0; i < bagSlots; i++) {
@@ -446,7 +431,6 @@ function renderBag() {
     bagCount.textContent = `(${invData.bag.length}/${bagSlots})`;
 }
 
-// Dibuja el maletín: la grilla de casillas y los objetos colocados.
 function renderCase() {
     const size = invData.caseSize;
     caseGrid.innerHTML = '';
@@ -464,7 +448,6 @@ function renderCase() {
         const el = document.createElement('div');
         el.className = 'case-item';
         el.title = def.name;
-        // Posición y tamaño en porcentajes de la grilla.
         el.style.left = (it.x / size * 100) + '%';
         el.style.top = (it.y / size * 100) + '%';
         el.style.width = (def.w / size * 100) + '%';
@@ -484,7 +467,6 @@ function renderCase() {
     setCellSize();
 }
 
-// Texto de ayuda del maletín y botón de expansión (se llama cada segundo: es liviano).
 function updateExpandBtn() {
     if (!gameConfig) return;
     const n = invData.caseSize;
@@ -507,7 +489,6 @@ expandCaseBtn.addEventListener('click', () => {
     });
 });
 
-// Panel de información del objeto seleccionado, con sus botones.
 function renderItemInfo() {
     itemInfo.innerHTML = '';
     if (!selected) return;
@@ -561,7 +542,6 @@ function renderItemInfo() {
     itemInfo.appendChild(card);
 }
 
-// Selecciona (o deselecciona) un objeto.
 function selectItem(payload) {
     const same = selected && selected.from === payload.from &&
         (payload.from === 'bag' ? selected.idx === payload.idx : selected.uid === payload.uid);
@@ -572,10 +552,8 @@ function selectItem(payload) {
 }
 
 // ---------- Arrastrar y soltar (funciona con mouse y con el dedo) ----------
-let drag = null; // { payload, def, startX, startY, ghost, moved, target }
+let drag = null;
 
-// ¿Entra el objeto "def" en la casilla (x, y) del maletín, según lo que ya hay?
-// (Solo para mostrar verde o rojo: el servidor lo vuelve a verificar.)
 function fitsLocal(def, x, y, ignoreUid) {
     if (!def.w) return false;
     const size = invData.caseSize;
@@ -587,17 +565,15 @@ function fitsLocal(def, x, y, ignoreUid) {
     });
 }
 
-// Saca el verde/rojo de las casillas.
 function clearHighlight() {
     caseCells.forEach((c) => c.classList.remove('ok', 'bad'));
 }
 
-// Pinta de verde o rojo las casillas que ocuparía el objeto arrastrado.
 function updateHover(x, y) {
     clearHighlight();
     drag.target = null;
     const rect = caseGrid.getBoundingClientRect();
-    if (!rect.width) return; // el maletín no está visible.
+    if (!rect.width) return;
     if (x < rect.left - 20 || x > rect.right + 20 || y < rect.top - 20 || y > rect.bottom + 20) return;
 
     const size = invData.caseSize;
@@ -605,7 +581,6 @@ function updateHover(x, y) {
     const def = drag.def;
     const w = def.w || 1;
     const h = def.h || 1;
-    // El objeto queda centrado en el puntero.
     const gx = Math.round((x - rect.left) / cs - w / 2);
     const gy = Math.round((y - rect.top) / cs - h / 2);
     const ok = fitsLocal(def, gx, gy, drag.payload.uid);
@@ -621,7 +596,7 @@ function updateHover(x, y) {
 }
 
 function onItemPointerDown(e, payload, def) {
-    if (e.button !== undefined && e.button !== 0) return; // solo clic izquierdo.
+    if (e.button !== undefined && e.button !== 0) return;
     e.preventDefault();
     drag = { payload, def, startX: e.clientX, startY: e.clientY, ghost: null, moved: false, target: null };
     window.addEventListener('pointermove', onDragMove);
@@ -632,10 +607,8 @@ function onItemPointerDown(e, payload, def) {
 function onDragMove(e) {
     if (!drag) return;
     if (!drag.moved) {
-        // Hasta que no se mueva unos pixeles, lo tomamos como un toque (no como arrastre).
         if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
         drag.moved = true;
-        // "Fantasma" que sigue al puntero, con el tamaño que ocuparía en el maletín.
         const rect = caseGrid.getBoundingClientRect();
         const cs = rect.width ? rect.width / invData.caseSize : 56;
         const ghost = document.createElement('div');
@@ -670,14 +643,12 @@ function onDragEnd(e) {
     endDragCleanup();
     drag = null;
 
-    // Un toque sin arrastrar: seleccionamos el objeto.
     if (!d.moved) { selectItem(d.payload); return; }
 
     invMsg.textContent = '';
     const report = (res) => { if (!res.ok) invMsg.textContent = '⚠️ ' + res.error; };
 
     if (d.target) {
-        // Lo soltó sobre el maletín.
         if (!d.target.ok) { invMsg.textContent = '⚠️ No entra en ese lugar.'; return; }
         if (d.payload.from === 'bag') {
             socket.emit('placeInCase', { idx: d.payload.idx, x: d.target.x, y: d.target.y }, report);
@@ -686,17 +657,15 @@ function onDragEnd(e) {
         }
         return;
     }
-    // Un objeto del maletín soltado sobre la mochila: vuelve a la mochila.
     const under = document.elementFromPoint(e.clientX, e.clientY);
     if (d.payload.from === 'case' && under && bagBox.contains(under)) {
         socket.emit('removeFromCase', { uid: d.payload.uid }, report);
     }
 }
 
-// El servidor manda la mochila y el maletín (al entrar y cada vez que cambian).
 socket.on('inventory', (data) => {
     invData = data;
-    selected = null; // los números de casilla pueden haber cambiado.
+    selected = null;
     renderBag();
     renderCase();
     renderItemInfo();
@@ -713,12 +682,11 @@ const shopManualBtn = document.getElementById('shopManualBtn');
 const shopManualInfo = document.getElementById('shopManualInfo');
 const shopMsg = document.getElementById('shopMsg');
 
-let shopData = null;      // lo último que mandó el servidor.
-let shopNextAt = 0;       // hora (de TU reloj) en que se actualiza la tienda.
-let shopResetAt = 0;      // hora en que se reponen las recargas manuales (0 = no hay espera).
-let shopButtons = [];     // botones "Comprar" de cada oferta.
+let shopData = null;
+let shopNextAt = 0;
+let shopResetAt = 0;
+let shopButtons = [];
 
-// Dibuja las ofertas.
 function renderShop() {
     shopOffers.innerHTML = '';
     shopButtons = [];
@@ -751,7 +719,6 @@ function renderShop() {
         btn.textContent = o.bought ? 'Comprado' : 'Comprar';
         btn.addEventListener('click', () => {
             shopMsg.textContent = '';
-            // Mandamos el precio que VEMOS: si la tienda cambió justo antes, el servidor no cobra otro.
             socket.emit('buyOffer', { id: o.id, price: o.price }, (res) => {
                 shopMsg.textContent = res.ok
                     ? `✅ Compraste ${res.name}${res.qty > 1 ? ' x' + res.qty : ''}. Está en tu mochila.`
@@ -766,7 +733,6 @@ function renderShop() {
     updateShopButtons();
 }
 
-// Habilita o no cada botón según tu dinero (se llama cada segundo).
 function updateShopButtons() {
     shopButtons.forEach(({ btn, offer }) => {
         btn.disabled = offer.bought || !lastState || lastState.money < offer.price;
@@ -777,7 +743,6 @@ function updateShopButtons() {
     }
 }
 
-// Cuentas regresivas de la tienda (cada segundo, con tu propio reloj).
 function updateShopTimer() {
     if (!shopData) return;
     const left = shopNextAt - Date.now();
@@ -790,9 +755,7 @@ function updateShopTimer() {
         shopManualInfo.textContent = 'Cada recarga manual cambia las ofertas y los precios al instante.';
     }
 }
-setInterval(updateShopTimer, 1000);
 
-// El servidor manda la tienda (al entrar y cada vez que cambia).
 socket.on('shop', (data) => {
     shopData = data;
     shopNextAt = Date.now() + data.nextInMs;
@@ -809,15 +772,29 @@ shopManualBtn.addEventListener('click', () => {
 });
 
 // ============================================================
-// MISIONES
+// MISIONES Y BOLSA DE DINERO
 // ============================================================
 const missionListEl = document.getElementById('missionList');
 const missionActive = document.getElementById('missionActive');
 const missionActiveText = document.getElementById('missionActiveText');
 const missionBar = document.getElementById('missionBar');
 const missionMsg = document.getElementById('missionMsg');
+const pouchBtn = document.getElementById('pouchBtn');
+const pouchValue = document.getElementById('pouchValue');
+const pouchText = document.getElementById('pouchText');
+const pouchMsg = document.getElementById('pouchMsg');
 
 let missionsData = [];
+
+// Bolsa de dinero: al tocarla, el servidor pasa lo acumulado a tu dinero y la bolsa vuelve a 0.
+pouchBtn.addEventListener('click', () => {
+    pouchMsg.textContent = '';
+    socket.emit('claimPouch', (res) => {
+        if (!res.ok) { pouchMsg.textContent = '⚠️ ' + res.error; return; }
+        pouchMsg.textContent = `✅ Reclamaste 💵 ${res.amount} de tus ganancias de gangster.`;
+        playAnim(pouchBtn, 'pop', 450);
+    });
+});
 
 function renderMissionButtons() {
     missionListEl.innerHTML = '';
@@ -834,9 +811,7 @@ function renderMissionButtons() {
 
         btn.addEventListener('click', () => {
             missionMsg.textContent = '';
-            socket.emit('startMission', m.id, (res) => {
-                if (!res.ok) missionMsg.textContent = '⚠️ ' + res.error;
-            });
+            socket.emit('startMission', m.id, (res) => { if (!res.ok) missionMsg.textContent = '⚠️ ' + res.error; });
         });
 
         missionListEl.appendChild(btn);
@@ -857,7 +832,6 @@ socket.on('missions', (list) => {
     renderMissionButtons();
 });
 
-// Aviso de misión terminada: dinero, XP, fama, subida de nivel y objetos raros.
 socket.on('missionDone', ({ name, reward, xp, fame, levelsGained, level, items }) => {
     let msg = `✅ Misión completada: ${name}. Ganaste 💵 ${reward}, ✨ ${xp} XP y ⭐ ${fame} de fama.`;
     if (levelsGained > 0) {
@@ -875,9 +849,129 @@ socket.on('missionDone', ({ name, reward, xp, fame, levelsGained, level, items }
 });
 
 // ============================================================
-// GUERRA
-// Dos tarjetas (vos y tu rival). El servidor manda cada golpe
-// en vivo (evento "warEvent") y acá lo animamos, con pistola o granada.
+// ANIMACIONES DE COMBATE (las usan la guerra normal y la repetición de la guerra de clanes)
+// "S" es un par de tarjetas { me, rival }; "me" mira a la derecha y "rival" a la izquierda.
+// ============================================================
+
+// Reinicia una animación CSS: saca la clase, fuerza al navegador a "olvidarla" y la vuelve a poner.
+function playAnim(el, cls, ms) {
+    el.classList.remove(cls);
+    void el.offsetWidth;
+    el.classList.add(cls);
+    setTimeout(() => el.classList.remove(cls), ms);
+}
+
+// Junta las partes de una tarjeta de luchador para poder actualizarlas fácil.
+function fighterParts(id) {
+    const root = document.getElementById(id);
+    return {
+        root,
+        avatar: root.querySelector('.f-avatar'),
+        name: root.querySelector('.f-name'),
+        sub: root.querySelector('.f-sub'),
+        hpFill: root.querySelector('.f-hp-fill'),
+        hpText: root.querySelector('.f-hp-text'),
+        stats: root.querySelector('.f-stats')
+    };
+}
+
+// Lista compacta de estadísticas dentro de una tarjeta.
+function fillStats(box, stats) {
+    box.innerHTML = '';
+    statsConfig.forEach((c) => {
+        const span = document.createElement('span');
+        span.textContent = `${c.icon} ${stats[c.id]}`;
+        span.title = c.label;
+        box.appendChild(span);
+    });
+}
+
+// Barra de vida de un lado ('me' o 'rival'): cambia de color según lo que queda.
+function setHpOn(S, side, hp, maxHp) {
+    const f = S[side];
+    const ratio = Math.max(0, Math.min(1, hp / maxHp));
+    f.hpFill.style.width = (ratio * 100) + '%';
+    f.hpFill.classList.toggle('mid', ratio <= 0.5 && ratio > 0.25);
+    f.hpFill.classList.toggle('low', ratio <= 0.25);
+    f.hpText.textContent = `${Math.round(hp)}/${maxHp}`;
+}
+
+// Número que flota sobre una tarjeta ('-12', '¡Esquivó!', etc.).
+function floatNumberOn(S, side, text, cls) {
+    const el = document.createElement('div');
+    el.className = 'float-num ' + cls;
+    el.textContent = text;
+    S[side].root.appendChild(el);
+    setTimeout(() => el.remove(), 1200);
+}
+
+// PISTOLA: sale de la carta, se levanta hacia el rival y dispara.
+function playPistolOn(S, side) {
+    const def = itemsCatalog.pistola;
+    if (!def) return;
+    const outer = document.createElement('div');
+    outer.className = 'gun-anim ' + side;
+    const inner = document.createElement('div');
+    inner.className = 'gun-inner';
+    inner.appendChild(makeIcon(def));
+    const flash = document.createElement('span');
+    flash.className = 'muzzle';
+    flash.textContent = '💥';
+    inner.appendChild(flash);
+    outer.appendChild(inner);
+    S[side].root.appendChild(outer);
+    setTimeout(() => outer.remove(), 1100);
+}
+
+// GRANADA: cae desde arriba sobre el rival y explota.
+function playGrenadeOn(S, targetSide) {
+    const def = itemsCatalog.granada;
+    if (!def) return;
+    const g = document.createElement('div');
+    g.className = 'grenade-anim';
+    g.appendChild(makeIcon(def));
+    const boom = document.createElement('div');
+    boom.className = 'boom';
+    boom.textContent = '💥';
+    S[targetSide].root.append(g, boom);
+    setTimeout(() => { g.remove(); boom.remove(); }, 1500);
+}
+
+// Anima UN golpe completo. ev = { actor: 'me'|'rival', result: 'hit'|'crit'|'dodge'|'boom', dmg, weapon: 'pistol'|'grenade'|'' }.
+// "onImpact" se ejecuta cuando el golpe llega (ahí se bajan las barras de vida).
+function playHit(S, arenaEl, ev, onImpact, speed = 1) {
+    const targetSide = ev.actor === 'me' ? 'rival' : 'me';
+
+    // 1) El que ataca brilla y se lanza hacia adelante, con su arma.
+    playAnim(S[ev.actor].root, 'acting', 900);
+    if (ev.weapon === 'pistol') playPistolOn(S, ev.actor);
+    if (ev.weapon === 'grenade') playGrenadeOn(S, targetSide);
+
+    // 2) Cuando el disparo o la granada llegan, se ve el efecto en el que recibe.
+    const delay = (ev.weapon === 'grenade' ? 800 : ev.weapon === 'pistol' ? 650 : 450) / speed;
+    setTimeout(() => {
+        const target = S[targetSide].root;
+        if (ev.result === 'dodge') {
+            playAnim(target, 'dodge', 600);
+            floatNumberOn(S, targetSide, '¡Esquivó!', 'dodge');
+        } else if (ev.result === 'boom') {
+            playAnim(target, 'crit-hit', 650);
+            playAnim(arenaEl, 'flash', 500);
+            floatNumberOn(S, targetSide, '💣 -' + ev.dmg, 'boom-num');
+        } else if (ev.result === 'crit') {
+            playAnim(target, 'crit-hit', 650);
+            playAnim(arenaEl, 'flash', 500);
+            floatNumberOn(S, targetSide, '💥 -' + ev.dmg, 'crit');
+        } else {
+            playAnim(target, 'hit', 550);
+            floatNumberOn(S, targetSide, '-' + ev.dmg, 'dmg');
+        }
+        onImpact();
+    }, delay);
+}
+
+// ============================================================
+// GUERRA (1 contra 1)
 // ============================================================
 const arena = document.getElementById('arena');
 const warInfo = document.getElementById('warInfo');
@@ -892,25 +986,11 @@ const playerSearchForm = document.getElementById('playerSearchForm');
 const playerSearchInput = document.getElementById('playerSearchInput');
 const playerResults = document.getElementById('playerResults');
 
-// Junta las partes de una tarjeta para poder actualizarlas fácil.
-function fighterParts(id) {
-    const root = document.getElementById(id);
-    return {
-        root,
-        avatar: root.querySelector('.f-avatar'),
-        name: root.querySelector('.f-name'),
-        sub: root.querySelector('.f-sub'),
-        hpFill: root.querySelector('.f-hp-fill'),
-        hpText: root.querySelector('.f-hp-text'),
-        stats: root.querySelector('.f-stats')
-    };
-}
 const fMe = fighterParts('fighterMe');
 const fRival = fighterParts('fighterRival');
 const sides = { me: fMe, rival: fRival };
 
-// Estado de la guerra en esta pantalla: 'idle' = sin rival, 'found' = rival encontrado, 'fighting' = peleando.
-let warState = 'idle';
+let warState = 'idle';   // 'idle' = sin rival, 'found' = rival encontrado, 'fighting' = peleando.
 let showingResult = false;
 let rivalInfo = null;
 let fightMax = { me: 0, rival: 0 };
@@ -918,77 +998,6 @@ let bannerTimer = null;
 let searchPending = false;
 let fightPending = false;
 
-// Reinicia una animación CSS: saca la clase, fuerza al navegador a "olvidarla" y la vuelve a poner.
-function playAnim(el, cls, ms) {
-    el.classList.remove(cls);
-    void el.offsetWidth;
-    el.classList.add(cls);
-    setTimeout(() => el.classList.remove(cls), ms);
-}
-
-// Dibuja la lista compacta de estadísticas dentro de una tarjeta.
-function fillStats(box, stats) {
-    box.innerHTML = '';
-    statsConfig.forEach((c) => {
-        const span = document.createElement('span');
-        span.textContent = `${c.icon} ${stats[c.id]}`;
-        span.title = c.label;
-        box.appendChild(span);
-    });
-}
-
-// Pone la barra de vida de un lado ('me' o 'rival').
-function setHp(side, hp, maxHp) {
-    const f = sides[side];
-    const ratio = Math.max(0, Math.min(1, hp / maxHp));
-    f.hpFill.style.width = (ratio * 100) + '%';
-    f.hpFill.classList.toggle('mid', ratio <= 0.5 && ratio > 0.25);
-    f.hpFill.classList.toggle('low', ratio <= 0.25);
-    f.hpText.textContent = `${Math.round(hp)}/${maxHp}`;
-}
-
-// Número que flota sobre la tarjeta ('-12', '¡Esquivó!', etc.).
-function floatNumber(side, text, cls) {
-    const el = document.createElement('div');
-    el.className = 'float-num ' + cls;
-    el.textContent = text;
-    sides[side].root.appendChild(el);
-    setTimeout(() => el.remove(), 1200);
-}
-
-// ----- Animación de la PISTOLA: sale de la carta, se levanta hacia el rival y dispara -----
-function playPistol(side) {
-    const def = itemsCatalog.pistola;
-    if (!def) return;
-    const outer = document.createElement('div');
-    outer.className = 'gun-anim ' + side; // "me" apunta a la derecha, "rival" a la izquierda.
-    const inner = document.createElement('div');
-    inner.className = 'gun-inner';
-    inner.appendChild(makeIcon(def));
-    const flash = document.createElement('span');
-    flash.className = 'muzzle';
-    flash.textContent = '💥';
-    inner.appendChild(flash);
-    outer.appendChild(inner);
-    sides[side].root.appendChild(outer);
-    setTimeout(() => outer.remove(), 1100);
-}
-
-// ----- Animación de la GRANADA: cae desde arriba sobre el rival y explota -----
-function playGrenade(targetSide) {
-    const def = itemsCatalog.granada;
-    if (!def) return;
-    const g = document.createElement('div');
-    g.className = 'grenade-anim';
-    g.appendChild(makeIcon(def));
-    const boom = document.createElement('div');
-    boom.className = 'boom';
-    boom.textContent = '💥';
-    sides[targetSide].root.append(g, boom);
-    setTimeout(() => { g.remove(); boom.remove(); }, 1500);
-}
-
-// Agrega una línea al registro del combate (lo más nuevo arriba).
 function addWarLog(text, cls) {
     const line = document.createElement('div');
     line.className = cls || '';
@@ -997,7 +1006,6 @@ function addWarLog(text, cls) {
     while (warLog.children.length > 40) warLog.removeChild(warLog.lastChild);
 }
 
-// Cartel de estado. Si autoHideMs > 0, se oculta solo.
 function showBanner(text, cls = '', autoHideMs = 0) {
     clearTimeout(bannerTimer);
     warBanner.textContent = text;
@@ -1011,17 +1019,15 @@ function clearWarFx() {
     fRival.root.classList.remove('winner', 'loser');
 }
 
-// Tu tarjeta: usa tus estadísticas TOTALES (con el extra del maletín).
 function renderMyCard() {
     if (!lastState) return;
     fMe.avatar.textContent = (myName || '?').charAt(0).toUpperCase();
     fMe.name.textContent = myName || '---';
     fMe.sub.textContent = `${lastState.className} · Nv ${lastState.level}`;
     fillStats(fMe.stats, lastState.totalStats);
-    if (warState !== 'fighting' && !showingResult) setHp('me', lastState.maxHp, lastState.maxHp);
+    if (warState !== 'fighting' && !showingResult) setHpOn(sides, 'me', lastState.maxHp, lastState.maxHp);
 }
 
-// Tarjeta del rival encontrado.
 function renderRivalCard(r) {
     rivalInfo = r;
     fRival.root.classList.remove('empty');
@@ -1029,10 +1035,9 @@ function renderRivalCard(r) {
     fRival.name.textContent = r.name;
     fRival.sub.textContent = `${r.className} · Nv ${r.level}` + (r.pistol ? ' · 🔫' : '');
     fillStats(fRival.stats, r.stats);
-    setHp('rival', r.maxHp, r.maxHp);
+    setHpOn(sides, 'rival', r.maxHp, r.maxHp);
 }
 
-// Diferencia de nivel con el rival y premio si ganás.
 function showRivalNote(r) {
     const n = Math.abs(r.levelDiff);
     const lv = n === 1 ? 'nivel' : 'niveles';
@@ -1044,7 +1049,6 @@ function showRivalNote(r) {
     rivalNote.textContent = text;
 }
 
-// Tarjeta del rival vacía.
 function clearRival() {
     rivalInfo = null;
     rivalNote.textContent = '';
@@ -1058,7 +1062,6 @@ function clearRival() {
     fRival.hpText.textContent = '-';
 }
 
-// Muestra un rival nuevo (buscado, elegido por nombre o restaurado al recargar la página).
 function applyRival(r) {
     warState = 'found';
     showingResult = false;
@@ -1071,7 +1074,6 @@ function applyRival(r) {
     updateWarButtons();
 }
 
-// Muestra u oculta los botones según el estado de la guerra, y las cargas de búsqueda.
 function updateWarButtons() {
     searchRivalBtn.hidden = warState === 'fighting';
     fightBtn.hidden = warState !== 'found';
@@ -1094,7 +1096,6 @@ function updateWarButtons() {
     }
 }
 
-// Vuelve la guerra a cero (al iniciar sesión o reconectar).
 function resetWar() {
     warState = 'idle';
     showingResult = false;
@@ -1106,11 +1107,10 @@ function resetWar() {
     warBanner.hidden = true;
     warMsg.textContent = '';
     playerResults.innerHTML = '';
-    if (lastState) setHp('me', lastState.maxHp, lastState.maxHp);
+    if (lastState) setHpOn(sides, 'me', lastState.maxHp, lastState.maxHp);
     updateWarButtons();
 }
 
-// ----- Buscar rival al azar -----
 searchRivalBtn.addEventListener('click', () => {
     warMsg.textContent = '';
     searchPending = true;
@@ -1127,7 +1127,6 @@ socket.on('rivalFound', (r) => {
     if (warState !== 'fighting') applyRival(r);
 });
 
-// ----- Buscar jugadores por nombre -----
 playerSearchForm.addEventListener('submit', (e) => {
     e.preventDefault();
     warMsg.textContent = '';
@@ -1168,7 +1167,6 @@ playerSearchForm.addEventListener('submit', (e) => {
     });
 });
 
-// ----- Pelear -----
 fightBtn.addEventListener('click', () => {
     warMsg.textContent = '';
     fightPending = true;
@@ -1180,8 +1178,8 @@ fightBtn.addEventListener('click', () => {
         warState = 'fighting';
         showingResult = false;
         fightMax = { me: res.maxHpMe, rival: res.maxHpRival };
-        setHp('me', fightMax.me, fightMax.me);
-        setHp('rival', fightMax.rival, fightMax.rival);
+        setHpOn(sides, 'me', fightMax.me, fightMax.me);
+        setHpOn(sides, 'rival', fightMax.rival, fightMax.rival);
         warLog.innerHTML = '';
         addWarLog('¡Comienza el combate!' + (res.grenade ? ' Llevás una 💣 granada lista.' : ''), 'l-sys');
         showBanner('⚔️ ¡Comienza el combate!', '', 1200);
@@ -1189,44 +1187,18 @@ fightBtn.addEventListener('click', () => {
     });
 });
 
-// ----- Cada golpe que manda el servidor -----
+// Cada golpe que manda el servidor.
 socket.on('warEvent', (ev) => {
     if (warState !== 'fighting') return;
-
-    const targetSide = ev.actor === 'me' ? 'rival' : 'me';
-    const actor = sides[ev.actor];
-    const target = sides[targetSide];
     const rivalName = rivalInfo ? rivalInfo.name : 'El rival';
 
-    // 1) El que ataca brilla y se lanza hacia adelante, con su arma.
-    playAnim(actor.root, 'acting', 900);
     if (ev.extra) showBanner('⚡ ¡Turno extra!', 'extra', 1000);
-    if (ev.weapon === 'pistol') playPistol(ev.actor);
-    if (ev.weapon === 'grenade') playGrenade(targetSide);
+    playHit(sides, arena, ev, () => {
+        setHpOn(sides, 'me', ev.hpMe, fightMax.me);
+        setHpOn(sides, 'rival', ev.hpRival, fightMax.rival);
+    });
 
-    // 2) Cuando el disparo o la granada llegan, se ve el efecto en el que recibe.
-    const delay = ev.weapon === 'grenade' ? 800 : ev.weapon === 'pistol' ? 650 : 450;
-    setTimeout(() => {
-        if (ev.result === 'dodge') {
-            playAnim(target.root, 'dodge', 600);
-            floatNumber(targetSide, '¡Esquivó!', 'dodge');
-        } else if (ev.result === 'boom') {
-            playAnim(target.root, 'crit-hit', 650);
-            playAnim(arena, 'flash', 500);
-            floatNumber(targetSide, '💣 -' + ev.dmg, 'boom-num');
-        } else if (ev.result === 'crit') {
-            playAnim(target.root, 'crit-hit', 650);
-            playAnim(arena, 'flash', 500);
-            floatNumber(targetSide, '💥 -' + ev.dmg, 'crit');
-        } else {
-            playAnim(target.root, 'hit', 550);
-            floatNumber(targetSide, '-' + ev.dmg, 'dmg');
-        }
-        setHp('me', ev.hpMe, fightMax.me);
-        setHp('rival', ev.hpRival, fightMax.rival);
-    }, delay);
-
-    // 3) Registro escrito del golpe.
+    // Registro escrito del golpe.
     const prefix = ev.extra ? '⚡ Turno extra: ' : '';
     const gun = ev.weapon === 'pistol' ? '🔫 ' : '';
     let text;
@@ -1244,7 +1216,6 @@ socket.on('warEvent', (ev) => {
     addWarLog(prefix + text, (ev.actor === 'me' ? 'l-me' : 'l-rival') + (ev.result === 'crit' || ev.result === 'boom' ? ' l-crit' : ''));
 });
 
-// ----- Fin de la pelea -----
 socket.on('warEnd', ({ result, reward, rivalName }) => {
     warState = 'idle';
     showingResult = true;
@@ -1271,7 +1242,7 @@ clearRival();
 
 // ============================================================
 // NOTIFICACIONES (campanita arriba a la derecha)
-// Avisos de ataques recibidos, con el registro de la pelea.
+// Dos tipos: 'attack' (te atacaron, con registro) y 'clanwar' (resultado de una guerra de clanes).
 // ============================================================
 const notifBtn = document.getElementById('notifBtn');
 const notifBadge = document.getElementById('notifBadge');
@@ -1279,10 +1250,10 @@ const notifPanel = document.getElementById('notifPanel');
 const notifList = document.getElementById('notifList');
 const notifClose = document.getElementById('notifClose');
 
-let notes = []; // notificaciones (la más nueva primero).
+let notes = [];
 
-// Texto de resumen. "result" está contado desde el punto de vista del ATACANTE.
 function noteSummary(n) {
+    if (n.type === 'clanwar') return n.text;
     if (n.result === 'win') return `⚔️ ${n.from} (Nv ${n.fromLevel}) te atacó y te venció.`;
     if (n.result === 'lose') return `🛡️ ${n.from} (Nv ${n.fromLevel}) te atacó, ¡pero lo derrotaste!`;
     return `🤝 ${n.from} (Nv ${n.fromLevel}) te atacó y terminaron en empate.`;
@@ -1293,20 +1264,18 @@ function noteLines(n) {
     return n.log.map((e) => {
         const gun = e.w === 'pistol' ? '🔫 ' : '';
         const extra = e.x ? '⚡ ' : '';
-        if (e.a === 'me') { // actuó el atacante.
+        if (e.a === 'me') {
             if (e.r === 'dodge') return `${extra}¡Esquivaste el ataque de ${n.from}!`;
             if (e.r === 'boom') return `${extra}💣 ${n.from} te lanzó una granada: -${e.d}.`;
             if (e.r === 'crit') return `${extra}${gun}💥 ¡CRÍTICO! ${n.from} te golpeó por ${e.d}.`;
             return `${extra}${gun}${n.from} ${e.w === 'pistol' ? 'te disparó' : 'te golpeó'} por ${e.d}.`;
         }
-        // actuaste vos, defendiéndote.
         if (e.r === 'dodge') return `${extra}${n.from} esquivó tu ataque.`;
         if (e.r === 'crit') return `${extra}${gun}💥 ¡CRÍTICO! Golpeaste a ${n.from} por ${e.d}.`;
         return `${extra}${gun}${e.w === 'pistol' ? 'Le disparaste' : 'Golpeaste'} a ${n.from} por ${e.d}.`;
     });
 }
 
-// Dibuja la lista de notificaciones y el globito con la cantidad sin leer.
 function renderNotifs() {
     const unread = notes.filter((n) => !n.read).length;
     notifBadge.hidden = unread < 1;
@@ -1316,7 +1285,7 @@ function renderNotifs() {
     if (!notes.length) {
         const empty = document.createElement('div');
         empty.className = 'notif-empty';
-        empty.textContent = 'Todavía no recibiste ataques.';
+        empty.textContent = 'Todavía no tenés notificaciones.';
         notifList.appendChild(empty);
         return;
     }
@@ -1329,65 +1298,62 @@ function renderNotifs() {
         const time = document.createElement('span');
         time.className = 'notif-time';
         time.textContent = new Date(n.ts).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        item.append(text, time);
 
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'notif-toggle';
-        toggle.textContent = 'Ver registro';
-        const log = document.createElement('div');
-        log.className = 'notif-log';
-        log.hidden = true;
-        noteLines(n).forEach((line) => {
-            const d = document.createElement('div');
-            d.textContent = line;
-            log.appendChild(d);
-        });
-        toggle.addEventListener('click', () => {
-            log.hidden = !log.hidden;
-            toggle.textContent = log.hidden ? 'Ver registro' : 'Ocultar registro';
-        });
-
-        item.append(text, time, toggle, log);
+        // Solo los ataques tienen registro para desplegar.
+        if (n.type !== 'clanwar' && n.log.length) {
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'notif-toggle';
+            toggle.textContent = 'Ver registro';
+            const log = document.createElement('div');
+            log.className = 'notif-log';
+            log.hidden = true;
+            noteLines(n).forEach((line) => {
+                const d = document.createElement('div');
+                d.textContent = line;
+                log.appendChild(d);
+            });
+            toggle.addEventListener('click', () => {
+                log.hidden = !log.hidden;
+                toggle.textContent = log.hidden ? 'Ver registro' : 'Ocultar registro';
+            });
+            item.append(toggle, log);
+        }
         notifList.appendChild(item);
     });
 }
 
 function openNotifs() {
-    // Las que estaban sin leer quedan resaltadas mientras el panel está abierto.
     notes.forEach((n) => { n.fresh = !n.read; n.read = true; });
     renderNotifs();
     notifPanel.hidden = false;
     socket.emit('readNotifications');
 }
-function closeNotifs() {
-    notifPanel.hidden = true;
-}
+function closeNotifs() { notifPanel.hidden = true; }
 notifBtn.addEventListener('click', () => { if (notifPanel.hidden) openNotifs(); else closeNotifs(); });
 notifClose.addEventListener('click', closeNotifs);
-// Tocar fuera del panel lo cierra.
 document.addEventListener('click', (e) => {
     if (!notifPanel.hidden && !document.getElementById('notifBox').contains(e.target)) closeNotifs();
 });
 
-// Lista inicial (al entrar).
 socket.on('notifications', (list) => {
     notes = list;
     renderNotifs();
 });
 
-// Un ataque nuevo, en vivo.
 socket.on('notification', (n) => {
-    n.read = !notifPanel.hidden; // si el panel está abierto, se considera leída.
-    n.fresh = notifPanel.hidden ? false : true;
+    n.read = !notifPanel.hidden;
+    n.fresh = !notifPanel.hidden;
     notes.unshift(n);
     if (notes.length > 30) notes.pop();
     renderNotifs();
     if (!notifPanel.hidden) socket.emit('readNotifications');
-    playAnim(notifBtn, 'ring', 1000); // la campanita se sacude.
+    playAnim(notifBtn, 'ring', 1000);
 });
 
 // ============================================================
-// CHAT (funciones compartidas por el chat global y el chat de clan)
+// CHAT (compartido por el chat global y el chat de clan)
 // ============================================================
 function addChatMessage(logEl, m) {
     const nearBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
@@ -1409,15 +1375,10 @@ function addChatMessage(logEl, m) {
 
     div.append(time, name, text);
     logEl.appendChild(div);
-
     while (logEl.children.length > 100) logEl.removeChild(logEl.firstChild);
-
     if (nearBottom || m.name === myName) logEl.scrollTop = logEl.scrollHeight;
 }
 
-// ============================================================
-// CHAT GLOBAL
-// ============================================================
 const chatLog = document.getElementById('chatLog');
 const chatForm = document.getElementById('chatForm');
 const chatInput = document.getElementById('chatInput');
@@ -1427,7 +1388,6 @@ socket.on('chatHistory', (list) => {
     list.forEach((m) => addChatMessage(chatLog, m));
     chatLog.scrollTop = chatLog.scrollHeight;
 });
-
 socket.on('chat', (m) => addChatMessage(chatLog, m));
 
 chatForm.addEventListener('submit', (e) => {
@@ -1472,7 +1432,6 @@ const rulesForm = document.getElementById('rulesForm');
 const rulesInput = document.getElementById('rulesInput');
 const rulesCount = document.getElementById('rulesCount');
 
-// Icono y nombre de cada rango.
 const ROLE_ICONS = { lider: '🎩', colider: '🕶️', oficial: '⭐', miembro: '👤' };
 const ROLE_LABELS = { lider: 'Líder', colider: 'Colíder', oficial: 'Oficial', miembro: 'Miembro' };
 
@@ -1480,7 +1439,7 @@ let myClanInfo = null;
 let lastClanName;
 let rulesDirty = false;
 
-// ¿Puede alguien con el rango "actor" gestionar a alguien con el rango "target"? (solo para mostrar botones)
+// (Solo para mostrar u ocultar botones: el servidor lo verifica de nuevo.)
 function canManageClient(actor, target) {
     if (actor === 'lider') return target !== 'lider';
     if (actor === 'colider') return target === 'miembro' || target === 'oficial';
@@ -1705,8 +1664,7 @@ confirmButton(leaveClanBtn, 'Salir del clan', '¿Seguro? Tocá de nuevo', () => 
     });
 });
 
-// ---------- Subpestañas del clan (Miembros / Chat / Reglas) ----------
-// (Usamos "#myClanBox" para no mezclarlas con las subpestañas del inventario.)
+// ---------- Subpestañas del clan (Miembros / Chat / Reglas / Guerra de clan) ----------
 const subTabs = document.querySelectorAll('#myClanBox .sub-tab');
 const clanPanes = document.querySelectorAll('#myClanBox .clan-pane');
 const clanChatLog = document.getElementById('clanChatLog');
@@ -1717,6 +1675,7 @@ function showClanPane(name) {
     subTabs.forEach((b) => b.classList.toggle('active', b.dataset.clanpane === name));
     clanPanes.forEach((p) => p.classList.toggle('active', p.id === 'clanPane-' + name));
     if (name === 'chat') clanChatLog.scrollTop = clanChatLog.scrollHeight;
+    if (name === 'guerra') loadClanWarPanel(); // al abrir la pestaña, pedimos los datos frescos.
 }
 subTabs.forEach((b) => b.addEventListener('click', () => showClanPane(b.dataset.clanpane)));
 
@@ -1748,6 +1707,457 @@ socket.on('clanNotice', (text) => {
 });
 
 // ============================================================
+// GUERRA DE CLANES: panel (elegir rival, historial) y aviso de arriba
+// ============================================================
+const cwListBox = document.getElementById('cwListBox');
+const cwInfo = document.getElementById('cwInfo');
+const cwPrepBox = document.getElementById('cwPrepBox');
+const cwCanDeclare = document.getElementById('cwCanDeclare');
+const cwCandidates = document.getElementById('cwCandidates');
+const cwHistory = document.getElementById('cwHistory');
+const cwMsg = document.getElementById('cwMsg');
+const clanWarAlert = document.getElementById('clanWarAlert');
+const clanWarAlertText = document.getElementById('clanWarAlertText');
+const clanWarAlertBtn = document.getElementById('clanWarAlertBtn');
+const clanWarAlertClose = document.getElementById('clanWarAlertClose');
+
+let cwData = null;          // lo último que mandó el servidor para el panel.
+let cwFetchedAt = 0;        // cuándo lo recibimos (para calcular los tiempos restantes con tu reloj).
+let warAlert = null;        // guerra de clanes en curso para el aviso de arriba.
+let warAlertHidden = false; // true si cerraste el aviso.
+
+// Pide al servidor los datos del panel de guerra de clan.
+function loadClanWarPanel() {
+    socket.emit('getClanWarPanel', (res) => {
+        if (!res.ok) { cwMsg.textContent = '⚠️ ' + res.error; return; }
+        cwData = res;
+        cwFetchedAt = Date.now();
+        renderClanWarPanel();
+    });
+}
+
+// ¿Hay una guerra preparándose (en cuenta regresiva)?
+function cwPrepActive() {
+    return !!(cwData && cwData.prep && cwFetchedAt + cwData.prep.startsInMs > Date.now());
+}
+
+// Dibuja la lista de clanes rivales y el historial.
+function renderClanWarPanel() {
+    if (!cwData) return;
+    cwCanDeclare.textContent = cwData.canDeclare
+        ? '✅ Podés declarar guerras (sos líder o colíder).'
+        : '🔒 Solo el líder y los colíderes pueden declarar guerras. Vos podés ver las repeticiones.';
+
+    // Candidatos
+    cwCandidates.innerHTML = '';
+    if (!cwData.candidates.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 4;
+        td.className = 'muted';
+        td.textContent = 'Todavía no hay otros clanes.';
+        tr.appendChild(td);
+        cwCandidates.appendChild(tr);
+    }
+    cwData.candidates.forEach((c) => {
+        const tr = document.createElement('tr');
+        tr.dataset.until = cwFetchedAt + c.lockMs;   // hora (de tu reloj) en que ese clan vuelve a estar libre.
+
+        const tdName = document.createElement('td');
+        tdName.textContent = c.name;
+        const tdMembers = document.createElement('td');
+        tdMembers.textContent = c.members;
+        const tdFame = document.createElement('td');
+        tdFame.textContent = c.fame;
+
+        const tdBtn = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn small cw-attack';
+        btn.textContent = '⚔️ Atacar';
+        const lock = document.createElement('div');
+        lock.className = 'cw-lock';
+        btn.addEventListener('click', () => {
+            cwMsg.textContent = '';
+            btn.disabled = true;
+            socket.emit('declareClanWar', c.id, (res) => {
+                if (!res.ok) { cwMsg.textContent = '⚠️ ' + res.error; loadClanWarPanel(); return; }
+                cwMsg.textContent = `✅ ¡Guerra declarada contra ${c.name}! Empieza en ${Math.round(res.startsInMs / 1000)} segundos.`;
+                loadClanWarPanel();
+            });
+        });
+        tdBtn.append(btn, lock);
+
+        tr.append(tdName, tdMembers, tdFame, tdBtn);
+        cwCandidates.appendChild(tr);
+    });
+    updateCwTimers();
+
+    // Historial
+    cwHistory.innerHTML = '';
+    if (!cwData.wars.length) {
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = 'Todavía no hubo guerras de clanes.';
+        cwHistory.appendChild(p);
+    }
+    cwData.wars.forEach((w) => {
+        const row = document.createElement('div');
+        row.className = 'cw-hist ' + (w.won ? 'won' : 'lost');
+
+        const info = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = `${w.attackerName} vs ${w.defenderName}`;
+        const sub = document.createElement('small');
+        sub.textContent = `${w.won ? '🏆 Ganó tu clan' : '💀 Perdió tu clan'} · ` +
+            new Date(w.ts).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        info.append(title, sub);
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn small';
+        btn.textContent = '▶ Ver repetición';
+        btn.addEventListener('click', () => watchWar(w.id));
+
+        row.append(info, btn);
+        cwHistory.appendChild(row);
+    });
+}
+
+// Se ejecuta cada segundo: cuenta regresiva de la guerra y bloqueos de los clanes.
+function updateCwTimers() {
+    const now = Date.now();
+
+    // Cuenta regresiva dentro del panel.
+    if (cwData && cwData.prep) {
+        const left = cwFetchedAt + cwData.prep.startsInMs - now;
+        cwPrepBox.hidden = false;
+        cwPrepBox.textContent = left > 0
+            ? `⏳ ${cwData.prep.attackerName} vs ${cwData.prep.defenderName}: la guerra empieza en ${fmtClock(left)}. ¡Subí tus estadísticas y equipá tu maletín!`
+            : '⚔️ La guerra está empezando...';
+    } else {
+        cwPrepBox.hidden = true;
+    }
+
+    // Botones "Atacar": se habilitan solo si podés declarar y ni tu clan ni el rival están bloqueados.
+    if (!cwData) return;
+    const myLockLeft = cwFetchedAt + cwData.lockMs - now;
+    const prepOn = cwPrepActive();
+    cwCandidates.querySelectorAll('tr[data-until]').forEach((tr) => {
+        const left = Number(tr.dataset.until) - now;
+        const btn = tr.querySelector('.cw-attack');
+        const lock = tr.querySelector('.cw-lock');
+        if (!btn) return;
+        btn.disabled = !cwData.canDeclare || prepOn || myLockLeft > 0 || left > 0;
+        lock.textContent = left > 0 ? `⏳ libre en ${fmtClock(left)}` : '';
+    });
+    cwInfo.textContent = (gameConfig
+        ? `Todos los miembros de tu clan pelean contra todos los del clan rival, de a uno por vez: el que gana sigue peleando con la vida que le queda hasta que un clan se queda sin luchadores. ` +
+          `No gasta energía. Cada clan puede participar en una guerra cada ${Math.round(gameConfig.clanWarCooldownMs / 60000)} minutos. ` +
+          `Cada miembro del clan ganador recibe 💵 ${gameConfig.clanWarReward}, ⭐ ${gameConfig.clanWarFame} y ✨ ${gameConfig.clanWarXp} XP.`
+        : '') + (myLockLeft > 0 ? ` ⏳ Tu clan podrá volver a pelear en ${fmtClock(myLockLeft)}.` : '');
+}
+
+// ----- Aviso de arriba (se ve en cualquier pestaña) -----
+function renderWarAlert() {
+    if (!warAlert || warAlertHidden) { clanWarAlert.hidden = true; return; }
+    const a = warAlert;
+    clanWarAlert.hidden = false;
+    clanWarAlertBtn.hidden = false;
+    if (a.status === 'prep') {
+        const left = a.startsAt - Date.now();
+        clanWarAlertText.textContent = left > 0
+            ? `⚔️ Guerra de clanes: ${a.attackerName} vs ${a.defenderName}. ¡Preparate! Empieza en ${fmtClock(left)}.`
+            : `⚔️ ${a.attackerName} vs ${a.defenderName}: la guerra está empezando...`;
+        clanWarAlertBtn.textContent = 'Ir al clan';
+    } else if (a.status === 'done') {
+        clanWarAlertText.textContent = `✅ Terminó la guerra ${a.attackerName} vs ${a.defenderName}. Ganó ${a.winnerName}.`;
+        clanWarAlertBtn.textContent = '▶ Ver guerra';
+    } else {
+        clanWarAlertText.textContent = '⚠️ ' + (a.message || 'La guerra se canceló.');
+        clanWarAlertBtn.hidden = true;
+    }
+}
+
+// Abre la pestaña Clan → Guerra de clan.
+function openClanWarPane() {
+    showTab('clan');
+    showClanPane('guerra');
+}
+
+// Abre una repetición (cambia a la pestaña y la carga).
+function openWarReplay(warId) {
+    openClanWarPane();
+    watchWar(warId);
+}
+
+clanWarAlertBtn.addEventListener('click', () => {
+    if (!warAlert) return;
+    if (warAlert.status === 'done') openWarReplay(warAlert.warId);
+    else openClanWarPane();
+});
+clanWarAlertClose.addEventListener('click', () => { warAlertHidden = true; renderWarAlert(); });
+
+// El servidor avisa cuando una guerra se declara, termina o se cancela.
+socket.on('clanWarUpdate', (d) => {
+    warAlert = { ...d, startsAt: Date.now() + d.startsInMs };
+    warAlertHidden = false;
+    renderWarAlert();
+    // Si estás mirando el panel de guerra, lo refrescamos (aparece la guerra nueva o el botón de repetición).
+    if (!myClanBox.hidden && document.getElementById('clanPane-guerra').classList.contains('active')) loadClanWarPanel();
+});
+
+// Cada segundo: cuentas regresivas del aviso y del panel.
+setInterval(() => {
+    if (warAlert && warAlert.status === 'prep') renderWarAlert();
+    updateCwTimers();
+}, 1000);
+
+// ============================================================
+// REPETICIÓN DE LA GUERRA DE CLANES
+// El servidor guarda la guerra entera como una lista de duelos y de golpes.
+// Acá se reproduce con las mismas animaciones de la guerra normal.
+// ============================================================
+const cwReplay = document.getElementById('cwReplay');
+const cwTitle = document.getElementById('cwTitle');
+const cwBack = document.getElementById('cwBack');
+const cwNameA = document.getElementById('cwNameA');
+const cwNameB = document.getElementById('cwNameB');
+const cwRosterA = document.getElementById('cwRosterA');
+const cwRosterB = document.getElementById('cwRosterB');
+const cwArena = document.getElementById('cwArena');
+const cwBannerEl = document.getElementById('cwBanner');
+const cwPause = document.getElementById('cwPause');
+const cwSpeed = document.getElementById('cwSpeed');
+const cwSkip = document.getElementById('cwSkip');
+const cwLog = document.getElementById('cwLog');
+
+// Las dos tarjetas de la repetición: "me" = clan atacante (izquierda), "rival" = clan defensor (derecha).
+const Scw = { me: fighterParts('cwLeft'), rival: fighterParts('cwRight') };
+
+// Estado de la repetición en curso (null = ninguna):
+// d = duelo actual, e = golpe actual (-1 = todavía no empezó el duelo), dead = miembros caídos, active = peleando ahora.
+let cw = null;
+let cwBannerTimer = null;
+
+function cwBanner(text, cls = '', hideMs = 0) {
+    clearTimeout(cwBannerTimer);
+    cwBannerEl.textContent = text;
+    cwBannerEl.className = cls;
+    cwBannerEl.hidden = false;
+    if (hideMs) cwBannerTimer = setTimeout(() => { cwBannerEl.hidden = true; }, hideMs);
+}
+
+function cwLogAdd(text, cls) {
+    const line = document.createElement('div');
+    line.className = cls || '';
+    line.textContent = text;
+    cwLog.prepend(line);
+    while (cwLog.children.length > 60) cwLog.removeChild(cwLog.lastChild);
+}
+
+// Una ficha por miembro: se apaga cuando cae y brilla cuando está peleando.
+function renderRoster(el, roster, dead, activeIdx) {
+    el.innerHTML = '';
+    roster.forEach((m, i) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip' + (dead.has(i) ? ' dead' : '') + (i === activeIdx ? ' active' : '');
+        chip.title = `${m.name} · Nv ${m.level}`;
+        chip.textContent = (m.role === 'lider' ? '🎩' : m.role === 'colider' ? '🕶️' : m.role === 'oficial' ? '⭐' : '') +
+            m.name.charAt(0).toUpperCase();
+        el.appendChild(chip);
+    });
+}
+
+function cwRenderRosters() {
+    renderRoster(cwRosterA, cw.war.rosterA, cw.dead.a, cw.active.a);
+    renderRoster(cwRosterB, cw.war.rosterB, cw.dead.b, cw.active.b);
+}
+
+// Llena una tarjeta con los datos de un luchador al empezar su duelo.
+function cwFillCard(side, snap) {
+    const f = Scw[side];
+    f.root.classList.remove('empty', 'winner', 'loser');
+    f.avatar.textContent = snap.name.charAt(0).toUpperCase();
+    f.name.textContent = snap.name;
+    f.sub.textContent = `${snap.className} · Nv ${snap.level}` + (snap.pistol ? ' · 🔫' : '');
+    fillStats(f.stats, snap.stats);
+    setHpOn(Scw, side, snap.hp, snap.maxHp);
+}
+
+// Programa el próximo paso (la velocidad x1/x2/x4 divide la espera).
+function cwSchedule(ms) {
+    if (!cw) return;
+    clearTimeout(cw.timer);
+    if (cw.paused || cw.ended) return;
+    cw.timer = setTimeout(cwStep, ms / cw.speed);
+}
+
+// Un paso de la repetición: empezar un duelo, mostrar un golpe o cerrar el duelo.
+function cwStep() {
+    if (!cw || cw.paused || cw.ended) return;
+    const duel = cw.war.duels[cw.d];
+    if (!duel) { cwFinish(); return; }
+    const turnMs = gameConfig ? gameConfig.warTurnMs : 1400;
+
+    // 1) Empieza el duelo.
+    if (cw.e === -1) {
+        cw.active = { a: duel.ia, b: duel.ib };
+        cwFillCard('me', duel.a);
+        cwFillCard('rival', duel.b);
+        cwRenderRosters();
+        cwBanner(`⚔️ Duelo ${cw.d + 1}/${cw.war.duels.length}: ${duel.a.name} vs ${duel.b.name}`, '', 1300);
+        cwLogAdd(`⚔️ Duelo ${cw.d + 1}: ${duel.a.name} (${Math.round(duel.a.hp)} HP) vs ${duel.b.name} (${Math.round(duel.b.hp)} HP).`, 'l-sys');
+        cw.e = 0;
+        cwSchedule(1300);
+        return;
+    }
+    // 2) Un golpe.
+    if (cw.e < duel.ev.length) {
+        cwPlayEvent(duel, duel.ev[cw.e]);
+        cw.e++;
+        cwSchedule(turnMs);
+        return;
+    }
+    // 3) Terminó el duelo: uno cae y el otro sigue.
+    cwEndDuel(duel);
+    cw.d++;
+    cw.e = -1;
+    cwSchedule(1800);
+}
+
+// Muestra UN golpe. Formato: [quién (0 = izquierda, 1 = derecha), resultado (0 golpe, 1 crítico, 2 esquive),
+// daño, turno extra, pistola, vida izquierda, vida derecha].
+function cwPlayEvent(duel, e) {
+    const ev = {
+        actor: e[0] === 0 ? 'me' : 'rival',
+        result: e[1] === 1 ? 'crit' : e[1] === 2 ? 'dodge' : 'hit',
+        dmg: e[2],
+        extra: !!e[3],
+        weapon: e[4] ? 'pistol' : ''
+    };
+    if (ev.extra) cwBanner('⚡ ¡Turno extra!', 'extra', 900);
+    playHit(Scw, cwArena, ev, () => {
+        setHpOn(Scw, 'me', e[5], duel.a.maxHp);
+        setHpOn(Scw, 'rival', e[6], duel.b.maxHp);
+    }, cw.speed);
+
+    // Registro escrito.
+    const att = ev.actor === 'me' ? duel.a.name : duel.b.name;
+    const def = ev.actor === 'me' ? duel.b.name : duel.a.name;
+    const gun = ev.weapon ? '🔫 ' : '';
+    const text = (ev.extra ? '⚡ ' : '') + (
+        ev.result === 'dodge' ? `${def} esquivó el ataque de ${att}.`
+        : ev.result === 'crit' ? `${gun}💥 ¡CRÍTICO! ${att} golpeó a ${def} por ${ev.dmg}.`
+        : `${gun}${att} ${ev.weapon ? 'le disparó' : 'golpeó'} a ${def} por ${ev.dmg}.`);
+    cwLogAdd(text, (ev.actor === 'me' ? 'l-me' : 'l-rival') + (ev.result === 'crit' ? ' l-crit' : ''));
+}
+
+// Cierra un duelo: el perdedor cae (su ficha se apaga) y el ganador sigue con la vida que le queda.
+function cwEndDuel(duel) {
+    const winSide = duel.w === 'a' ? 'me' : 'rival';
+    const loseSide = duel.w === 'a' ? 'rival' : 'me';
+    const winSnap = duel.w === 'a' ? duel.a : duel.b;
+    const loseSnap = duel.w === 'a' ? duel.b : duel.a;
+    const last = duel.ev[duel.ev.length - 1];
+    const winHp = duel.w === 'a' ? last[5] : last[6];
+
+    Scw[winSide].root.classList.add('winner');
+    Scw[loseSide].root.classList.add('loser');
+    setHpOn(Scw, loseSide, 0, loseSnap.maxHp);
+    (duel.w === 'a' ? cw.dead.b : cw.dead.a).add(duel.w === 'a' ? duel.ib : duel.ia);
+    cwRenderRosters();
+    cwLogAdd(`💀 ${loseSnap.name} cayó${duel.t ? ' (por tener menos vida al agotarse los golpes)' : ''}. ` +
+        `${winSnap.name} sigue de pie con ${Math.round(winHp)} de vida.`, 'l-sys l-crit');
+}
+
+// Resultado final de la guerra.
+function cwFinish() {
+    if (!cw) return;
+    cw.ended = true;
+    clearTimeout(cw.timer);
+    const war = cw.war;
+    const won = war.winner === war.mySide;
+    cwBanner(won ? `🏆 ¡Tu clan ganó la guerra! (${war.winnerName})` : `💀 Tu clan perdió. Ganó ${war.winnerName}.`, won ? 'win' : 'lose');
+    cwLogAdd(`🏁 ¡${war.winnerName} ganó la guerra! Cada miembro del clan ganador recibió ` +
+        `💵 ${war.reward.money}, ⭐ ${war.reward.fame} y ✨ ${war.reward.xp} XP.`, 'l-sys l-crit');
+    cwPause.disabled = true;
+    cwSkip.disabled = true;
+}
+
+// Salta directo al final.
+function cwSkipToEnd() {
+    if (!cw || cw.ended) return;
+    cw.war.duels.forEach((d) => (d.w === 'a' ? cw.dead.b : cw.dead.a).add(d.w === 'a' ? d.ib : d.ia));
+    cw.active = { a: -1, b: -1 };
+    cwRenderRosters();
+    cwFinish();
+}
+
+// Detiene la repetición (al volver a la lista o al reconectar).
+function cwStop() {
+    if (cw) clearTimeout(cw.timer);
+    cw = null;
+}
+
+// Arranca una repetición con los datos que mandó el servidor.
+function openReplayView(war) {
+    cwStop();
+    cw = { war, d: 0, e: -1, timer: null, speed: 1, paused: false, ended: false,
+           dead: { a: new Set(), b: new Set() }, active: { a: -1, b: -1 } };
+
+    cwListBox.hidden = true;
+    cwReplay.hidden = false;
+    cwTitle.textContent = `${war.attackerName} ⚔️ ${war.defenderName}`;
+    cwNameA.textContent = war.attackerName + (war.mySide === 'a' ? ' (tu clan)' : '');
+    cwNameB.textContent = war.defenderName + (war.mySide === 'b' ? ' (tu clan)' : '');
+    cwLog.innerHTML = '';
+    cwBannerEl.hidden = true;
+    cwPause.disabled = false;
+    cwSkip.disabled = false;
+    cwPause.textContent = '⏸ Pausa';
+    cwSpeed.textContent = 'Velocidad x1';
+    ['me', 'rival'].forEach((s) => {
+        Scw[s].root.classList.add('empty');
+        Scw[s].root.classList.remove('winner', 'loser');
+    });
+    cwRenderRosters();
+    cwLogAdd(`¡Comienza la guerra! ${war.rosterA.length} luchadores vs ${war.rosterB.length}. Pelea primero el de menor rango de cada clan y el líder pelea último.`, 'l-sys');
+    cwSchedule(900);
+}
+
+// Pide la repetición al servidor.
+function watchWar(warId) {
+    cwMsg.textContent = '';
+    socket.emit('getClanWarReplay', warId, (res) => {
+        if (!res.ok) { cwMsg.textContent = '⚠️ ' + res.error; return; }
+        openReplayView(res.war);
+    });
+}
+
+cwBack.addEventListener('click', () => {
+    cwStop();
+    cwReplay.hidden = true;
+    cwListBox.hidden = false;
+    loadClanWarPanel();
+});
+
+cwPause.addEventListener('click', () => {
+    if (!cw || cw.ended) return;
+    cw.paused = !cw.paused;
+    cwPause.textContent = cw.paused ? '▶ Seguir' : '⏸ Pausa';
+    if (!cw.paused) cwSchedule(200);
+});
+
+cwSpeed.addEventListener('click', () => {
+    if (!cw) return;
+    cw.speed = cw.speed === 1 ? 2 : cw.speed === 2 ? 4 : 1;
+    cwSpeed.textContent = 'Velocidad x' + cw.speed;
+});
+
+cwSkip.addEventListener('click', cwSkipToEnd);
+
+// ============================================================
 // CONFIGURACIÓN Y ESTADO PERSONAL
 // ============================================================
 
@@ -1769,8 +2179,20 @@ socket.on('config', (cfg) => {
         'Lo que compres va a tu mochila; si es un arma o granadas, pasalo al maletín de guerra.';
     editNameHint.textContent =
         `Podés cambiarlo cada ${Math.round(cfg.nameCooldownMs / 60000)} minutos. Es también tu nombre para iniciar sesión.`;
+    pouchText.textContent =
+        `Esta bolsa de dinero son tus ganancias de gangster: suma 💵 ${cfg.pouchPerSecond} por cada segundo que estás conectado. Tocá la bolsa para reclamarlas.`;
+    resetInfo.textContent =
+        `Devuelve tus estadísticas a las básicas de Matón y te da todos tus puntos para repartirlos de nuevo. ` +
+        `Cuesta 💵 ${cfg.resetStatsBase} la primera vez y ${cfg.resetStatsBase} más cada vez que lo usás.`;
     rulesInput.maxLength = cfg.clanRulesMax;
+
     resetWar();
+    cwStop();                      // si había una repetición abierta, la cerramos.
+    cwReplay.hidden = true;
+    cwListBox.hidden = false;
+    cwData = null;
+    warAlert = null;               // el servidor nos vuelve a avisar si hay una guerra en preparación.
+    renderWarAlert();
     renderBag();
     renderCase();
     updateClanButtons();
@@ -1789,6 +2211,11 @@ function renderState(s) {
     moneyValue.textContent = s.money;
     fameValue.textContent = s.fame;
 
+    // Bolsa de dinero.
+    pouchValue.textContent = s.pouch;
+   pouchBtn.disabled = s.pouch < 1;   // con la bolsa vacía no hay nada para reclamar.
+
+    // Energía.
     energyValue.textContent = s.energy;
     energyMax.textContent = s.maxEnergy;
     energyBar.style.width = (s.energy / s.maxEnergy * 100) + '%';
@@ -1809,15 +2236,17 @@ function renderState(s) {
             r.value.appendChild(b);
         }
         r.effect.textContent = s.effects[id];
-        r.plus.disabled = s.statPoints < 1;
-        r.buy.disabled = !canBuy;
+        r.plus.disabled = s.statPoints < 1;   // "+" necesita puntos de nivel.
+        r.buy.disabled = !canBuy;             // "💵" necesita dinero.
     });
+    // Globito rojo en el botón Inventario si hay puntos sin gastar.
     inventoryBadge.hidden = s.statPoints < 1;
     inventoryBadge.textContent = s.statPoints;
+    updateResetBtn();                         // precio actual del reinicio de estadísticas.
 
-    // Misión en curso.
+    // Misión en curso: mostramos el progreso. Si no hay, ocultamos el bloque.
     if (s.mission) {
-        const done = 1 - s.mission.remainingMs / s.mission.durationMs;
+        const done = 1 - s.mission.remainingMs / s.mission.durationMs; // de 0 a 1.
         missionActive.hidden = false;
         missionActiveText.textContent =
             `Haciendo: ${s.mission.name} — faltan ${Math.ceil(s.mission.remainingMs / 1000)}s`;
@@ -1830,14 +2259,21 @@ function renderState(s) {
     updateClanButtons();
     updateShopButtons();   // habilita o no "Comprar" según tu dinero.
     updateExpandBtn();     // botón de expandir el maletín.
-    renderMyCard();
-    updateWarButtons();
+    renderMyCard();        // tarjeta de Guerra con tus datos actuales.
+    updateWarButtons();    // cargas de búsqueda y botón de pelear.
 
+    // Si cambió mi clan (entré, salí, me expulsaron, renombraron o recién cargó),
+    // cerramos cualquier repetición abierta y pedimos los datos del clan y su chat.
     if (s.clan !== lastClanName) {
         lastClanName = s.clan;
+        cwStop();
+        cwReplay.hidden = true;
+        cwListBox.hidden = false;
+        cwData = null;
         loadMyClan();
         loadClanChat();
     }
 }
 
+// Estado personal (llega cada segundo y cuando algo cambia).
 socket.on('state', renderState);
