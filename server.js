@@ -1,7 +1,6 @@
 // ============================================================
-// server.js — Servidor del juego (v8: tienda, maletín de guerra,
-// objetos, notificaciones de ataque, búsqueda por nombre y
-// rival guardado)
+// server.js — Servidor del juego (v9: bolsa de dinero, guerra de
+// clanes con repetición, reinicio de estadísticas)
 // El servidor es el ÚNICO que decide niveles, dinero, energía,
 // objetos, clanes y peleas. El navegador solo pide acciones
 // y muestra el resultado.
@@ -19,11 +18,11 @@ const server = http.createServer(app);
 const io = socketIo(server, { cors: { origin: "*" } });
 
 // Ruta de prueba: sirve para verificar qué versión corre en Render.
-app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v8 tienda, maletin y notificaciones'));
+app.get('/', (req, res) => res.send('Servidor funcionando 🎉 - v9 guerra de clanes'));
 
 // La URL de MongoDB está en las variables de entorno de Render (nunca en el código).
 const client = new MongoClient(process.env.MONGODB_URI);
-let users, messages, clans, clanMessages, notifications; // colecciones de la base, se llenan en start().
+let users, messages, clans, clanMessages, notifications, clanWars; // colecciones (se llenan en start()).
 
 // ============================================================
 // CONFIGURACIÓN DEL JUEGO (acá ajustás los números)
@@ -36,27 +35,40 @@ const POINTS_PER_LEVEL = 5;      // puntos de estadística que da cada nivel.
 const XP_BASE = 100;             // XP necesaria para pasar del nivel 1 al 2.
 const XP_GROWTH = 1.1;           // cada nivel pide 10% más XP que el anterior.
 const STAT_COST = 1500;          // dinero que cuesta comprar 1 punto de estadística.
+const RESET_STATS_COST = 500;    // reinicio de estadísticas: 1ª vez 500, 2ª 1000, 3ª 1500...
+
+// ---------- Bolsa de dinero (ganancias de gangster) ----------
+const POUCH_PER_SECOND = 1;      // pesos que suma la bolsa por segundo (solo mientras estás conectado).
+const POUCH_MAX = 0;             // tope de la bolsa (0 = sin tope).
 
 const CLAN_JOIN_LEVEL = 5;       // nivel mínimo para unirse a un clan.
 const CLAN_CREATE_LEVEL = 10;    // nivel mínimo para crear un clan.
 const CLAN_MAX_MEMBERS = 30;     // máximo de miembros por clan.
 const CLAN_RULES_MAX = 1000;     // máximo de caracteres de las reglas del clan.
 
-// Rangos del clan, de menor a mayor. El "lider" no se guarda en el jugador:
-// se sabe porque su ID está en el campo "owner" del clan.
+// Rangos del clan, de menor a mayor. El "lider" se sabe porque su ID está en el campo "owner" del clan.
 const ROLE_RANK = { miembro: 0, oficial: 1, colider: 2, lider: 3 };
-const MANAGER_ROLES = ['lider', 'colider']; // rangos que pueden expulsar y editar las reglas.
+const MANAGER_ROLES = ['lider', 'colider']; // rangos que pueden expulsar, editar reglas y declarar guerras.
+
+// ---------- Guerra de clanes ----------
+const CLAN_WAR_PREP_MS = 60 * 1000;           // cuenta regresiva antes de que empiece (1 minuto).
+const CLAN_WAR_COOLDOWN_MS = 10 * 60 * 1000;  // cada clan puede participar en una guerra cada 10 minutos.
+const CLAN_WAR_REWARD = 5000;                 // dinero que gana CADA miembro del clan vencedor.
+const CLAN_WAR_FAME = 5;                      // fama que gana cada miembro del clan vencedor.
+const CLAN_WAR_XP = 200;                      // experiencia que gana cada miembro del clan vencedor.
+const CLAN_WAR_HEAL_PCT = 0;                  // vida que recupera el ganador de un duelo (0 = nada, 0.2 = 20%).
+const CLAN_WAR_TTL_SECONDS = 30 * 24 * 60 * 60; // las repeticiones se guardan 30 días.
+const CLAN_WAR_HISTORY = 10;                  // cuántas guerras se listan en el clan.
 
 // Cambio de nombre (de usuario y de clan): tiempo de espera entre un cambio y otro.
 const NAME_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutos.
-// Nombres válidos: 3 a 20 caracteres entre letras, números, espacios, guion bajo, guion y punto.
 const NAME_REGEX = /^[\p{L}\p{N} _.-]{3,20}$/u;
 const NAME_ERROR = 'Nombre inválido: usá entre 3 y 20 letras, números, espacios, guiones o puntos.';
 
 // Cuánto viven los mensajes y avisos antes de que MongoDB los borre solo.
 const CHAT_TTL_SECONDS = 30 * 60;               // chat global: 30 minutos.
 const CLAN_CHAT_TTL_SECONDS = 7 * 24 * 60 * 60; // chat de clan: 7 días.
-const NOTIF_TTL_SECONDS = 7 * 24 * 60 * 60;     // notificaciones de ataque: 7 días.
+const NOTIF_TTL_SECONDS = 7 * 24 * 60 * 60;     // notificaciones: 7 días.
 const NOTIF_MAX = 30;                           // cuántas notificaciones se muestran como máximo.
 
 // ---------- Guerra ----------
@@ -67,22 +79,18 @@ const WAR_MAX_ACTIONS = 60;  // tope de golpes por pelea (evita peleas eternas).
 const HP_PER_VIDA = 5;       // cada punto de Vida da 5 HP en combate.
 const CRIT_MULT = 2;         // un crítico pega el doble.
 const GRENADE_DAMAGE = 35;   // daño de una granada (no se esquiva ni se reduce con aguante).
-const GRENADES_PER_FIGHT = 1; // granadas que se lanzan por pelea (se gasta 1 de las que lleves).
+const GRENADES_PER_FIGHT = 1; // granadas que se lanzan por pelea.
 
 // Búsqueda de rival: cargas.
 const SEARCH_MAX = 3;                         // cargas de búsqueda.
 const SEARCH_RECHARGE_MS = 10 * 60 * 1000;    // al gastar la última, se recargan todas tras 10 minutos.
-// Buscar un jugador por nombre ¿gasta una carga? (false = es gratis)
-const NAME_SEARCH_COSTS_CHARGE = false;
-// Tiempo hasta poder volver a atacar al MISMO rival.
-const RIVAL_COOLDOWN_MS = 20 * 60 * 1000;
+const NAME_SEARCH_COSTS_CHARGE = false;       // ¿buscar por nombre gasta una carga? (false = gratis)
+const RIVAL_COOLDOWN_MS = 20 * 60 * 1000;     // tiempo hasta poder volver a atacar al MISMO rival.
 
-// Emparejamiento: se busca primero a ±5 niveles; si no hay nadie, se amplía el rango.
-// El último valor (Infinity) significa "cualquier nivel".
+// Emparejamiento: primero ±5 niveles; si no hay nadie, se amplía. Infinity = cualquier nivel.
 const MATCH_RANGES = [5, 10, 25, Infinity];
 
-// Premio según la diferencia de nivel: ±10% por cada nivel de diferencia,
-// con un mínimo de 30% y un máximo de 200% del premio base.
+// Premio según la diferencia de nivel (±10% por nivel, entre 30% y 200% del premio base).
 const REWARD_PER_LEVEL = 0.1;
 const REWARD_MIN_MULT = 0.3;
 const REWARD_MAX_MULT = 2;
@@ -91,7 +99,7 @@ const REWARD_MAX_MULT = 2;
 const PCT_BASE = 100;
 const PCT_PER_LEVEL = 4;
 
-// Topes de los porcentajes (para que ninguna estadística haga invencible a nadie).
+// Topes de los porcentajes.
 const ARMOR_CAP = 0.75;      // aguante: máximo 75% menos de daño.
 const EXTRA_TURN_CAP = 0.5;  // velocidad: máximo 50% de turno extra.
 const DODGE_CAP = 0.5;       // inteligencia: máximo 50% de esquivar.
@@ -103,19 +111,15 @@ function pct(stat, cap, level) {
 }
 
 // ---------- Mochila y maletín ----------
-const BAG_SLOTS = 20;          // casillas de la mochila (cada casilla guarda una pila de un objeto).
+const BAG_SLOTS = 20;          // casillas de la mochila.
 const CASE_BASE = 3;           // el maletín empieza de 3x3.
 const CASE_EXPANDED = 5;       // con la expansión (+2x2) pasa a 5x5.
 const CASE_EXPAND_COST = 2000; // precio de la expansión.
 const CASE_EXPAND_LEVEL = 10;  // nivel necesario para comprarla.
 
 // ---------- Objetos ----------
-// - kind: 'consumable' (se usa desde la mochila), 'weapon' (arma) o 'grenade'.
-// - w, h: tamaño en el maletín (ancho x alto). Sin w/h = no entra al maletín.
-// - stackMax: cuántas unidades caben juntas en una casilla.
-// - shopQty: cuántas unidades vienen en una compra de la tienda.
-// - img: ruta de la imagen (si el archivo no existe, se muestra el emoji).
-// Para agregar una escopeta en el futuro: copiá la pistola con w: 3, h: 2 y otro dmg.
+// kind: 'consumable' (se usa desde la mochila), 'weapon' o 'grenade'. w/h: tamaño en el maletín.
+// stackMax: unidades por casilla. shopQty: unidades por compra. img: ruta de la imagen (si no existe, se ve el emoji).
 const ITEMS = {
     chocolate: {
         name: 'Chocolate', emoji: '🍫', img: 'img/items/chocolate.png',
@@ -133,7 +137,7 @@ const ITEMS = {
         kind: 'grenade', w: 2, h: 1, stackMax: 5, shopQty: 5
     }
 };
-Object.keys(ITEMS).forEach(id => { ITEMS[id].id = id; }); // cada objeto conoce su propio ID.
+Object.keys(ITEMS).forEach(id => { ITEMS[id].id = id; });
 
 // Versión del catálogo que se le manda al navegador.
 const ITEMS_CLIENT = {};
@@ -148,11 +152,11 @@ Object.values(ITEMS).forEach(i => {
 const SHOP_ITEMS = ['chocolate', 'pistola', 'granada']; // qué objetos vende.
 const SHOP_REFRESH_MS = 60 * 60 * 1000;                 // se actualiza cada 1 hora.
 const SHOP_MANUAL_MAX = 2;                              // recargas manuales por día.
-const SHOP_MANUAL_RESET_MS = 24 * 60 * 60 * 1000;       // las recargas se reponen 24 h después de la primera que uses.
-const PRICE_MIN = 300;                                  // precio mínimo de una oferta.
-const PRICE_MAX = 700;                                  // precio máximo de una oferta.
+const SHOP_MANUAL_RESET_MS = 24 * 60 * 60 * 1000;       // se reponen 24 h después de la primera que uses.
+const PRICE_MIN = 300;
+const PRICE_MAX = 700;
 
-// Estadísticas del personaje (el "id" es el nombre interno, el "label" el que se ve).
+// Estadísticas del personaje.
 const STATS = [
     { id: 'vida',         label: 'Vida',         icon: '❤️' },
     { id: 'dano',         label: 'Daño',         icon: '💥' },
@@ -161,7 +165,7 @@ const STATS = [
     { id: 'inteligencia', label: 'Inteligencia', icon: '🧠' },
     { id: 'suerte',       label: 'Suerte',       icon: '🍀' }
 ];
-const STAT_IDS = STATS.map(s => s.id); // lista de IDs válidos (para validar lo que manda el cliente).
+const STAT_IDS = STATS.map(s => s.id);
 
 // Clases de personaje: cada una define sus estadísticas iniciales.
 const CLASSES = {
@@ -171,12 +175,9 @@ const CLASSES = {
     apostador: { name: 'Apostador', stats: { vida: 16, dano: 15, aguante: 14, velocidad: 14, inteligencia: 14, suerte: 26 } },
     sicario:   { name: 'Sicario',   stats: { vida: 18, dano: 15, aguante: 16, velocidad: 20, inteligencia: 14, suerte: 16 } }
 };
-const DEFAULT_CLASS = 'maton'; // clase que reciben todos los personajes por ahora.
+const DEFAULT_CLASS = 'maton';
 
-// Lista de misiones. Para agregar una, copiá una línea y cambiá los datos.
-// - energy: energía que cuesta.   - durationMs: cuánto tarda (ms).
-// - reward: dinero que paga.      - xp: experiencia.   - fame: fama que da.
-// - drops: objetos raros que pueden caer al terminar (chance: 0.03 = 3%).
+// Misiones. drops: objetos raros que pueden caer al terminar (chance: 0.03 = 3%).
 const MISSIONS = [
     { id: 'carteras', name: 'Robar carteras',     energy: 5,  durationMs: 10000, reward: 20,  xp: 20,  fame: 1,
       drops: [ { id: 'chocolate', chance: 0.03, qty: 1 } ] },
@@ -190,23 +191,22 @@ const MISSIONS = [
 // ESTADO EN MEMORIA
 // ============================================================
 
-// Jugadores conectados AHORA. Cada jugador tiene (entre otras cosas):
-// key (ID interno FIJO), name, money, energy, level, xp, fame, stats, clanId...
-// bag: mochila [{ id, qty }]            briefcase: maletín [{ uid, id, qty, x, y }]
-// shop: tienda propia                   rival: rival buscado (todavía sin pelear)
-// recentAttacks: rivales atacados hace poco [{ key, at }]
+// Jugadores conectados AHORA. Cada uno tiene (entre otras cosas): key (ID interno FIJO), name, money,
+// pouch (bolsa de dinero), energy, level, xp, fame, stats, statResets, clanId, bag, briefcase, shop, rival...
 const online = {};
 
 // Cachés leídos de la base cada 10 segundos (incluyen jugadores desconectados):
-let topScoreCache = []; // top 50 por tiempo jugado.
-let topFameCache = [];  // top 50 por fama.
-let clanCache = [];     // ranking de clanes.
+let topScoreCache = [];
+let topFameCache = [];
+let clanCache = [];
+
+// Temporizadores de las guerras de clanes en preparación: { warId: temporizador }.
+const clanWarTimers = {};
 
 // ============================================================
 // FUNCIONES DE AYUDA
 // ============================================================
 
-// Convierte contraseña + salt en un hash ilegible (scrypt es lento a propósito).
 function hashPassword(password, salt) {
     return crypto.scryptSync(password, salt, 64).toString('hex');
 }
@@ -224,23 +224,19 @@ function cleanName(raw) {
     return NAME_REGEX.test(name) ? name : null;
 }
 
-// Busca un usuario por su nombre en minúsculas ("nameKey"). Los viejos se encuentran por su _id.
 function findUserByNameKey(nameKey) {
     return users.findOne({ $or: [{ nameKey }, { nameKey: { $exists: false }, _id: nameKey }] });
 }
-
-// Igual, pero para clanes.
 function findClanByNameKey(nameKey) {
     return clans.findOne({ $or: [{ nameKey }, { nameKey: { $exists: false }, _id: nameKey }] });
 }
 
-// XP necesaria para pasar del nivel "level" al siguiente.
 function xpNeeded(level) {
     return Math.round(XP_BASE * Math.pow(XP_GROWTH, level - 1));
 }
 
-// Suma experiencia y sube de nivel las veces que haga falta.
-// Cada nivel da puntos de estadística y +1 de fama. Devuelve cuántos niveles subió.
+// Suma experiencia y sube de nivel las veces que haga falta (también sirve para un objeto cualquiera
+// que tenga xp, level, statPoints y fame). Devuelve cuántos niveles subió.
 function addXp(p, amount) {
     p.xp += amount;
     let gained = 0;
@@ -254,7 +250,11 @@ function addXp(p, amount) {
     return gained;
 }
 
-// Completa las estadísticas de un documento de la base.
+// Cuánto cuesta el próximo reinicio de estadísticas (500, 1000, 1500...).
+function resetCost(p) {
+    return RESET_STATS_COST * (p.statResets + 1);
+}
+
 function resolveStats(user) {
     const cls = CLASSES[user.class] ? user.class : DEFAULT_CLASS;
     const base = CLASSES[cls].stats;
@@ -264,8 +264,6 @@ function resolveStats(user) {
 }
 
 // ---------- Limpieza de datos que vienen de la base ----------
-
-// Mochila: solo objetos que existen, con cantidades válidas.
 function sanitizeBag(raw) {
     if (!Array.isArray(raw)) return [];
     return raw
@@ -273,22 +271,16 @@ function sanitizeBag(raw) {
         .slice(0, BAG_SLOTS)
         .map(s => ({ id: s.id, qty: Math.min(s.qty, ITEMS[s.id].stackMax) }));
 }
-
-// Maletín: solo objetos que existen, que entran en el maletín y tienen posición.
 function sanitizeCase(raw) {
     if (!Array.isArray(raw)) return [];
     return raw
         .filter(it => it && ITEMS[it.id] && ITEMS[it.id].w && Number.isInteger(it.x) && Number.isInteger(it.y) && it.uid && it.qty > 0)
         .map(it => ({ uid: String(it.uid), id: it.id, qty: Math.min(it.qty, ITEMS[it.id].stackMax), x: it.x, y: it.y }));
 }
-
-// Rivales atacados hace poco.
 function sanitizeRecent(raw) {
     if (!Array.isArray(raw)) return [];
     return raw.filter(r => r && typeof r.key === 'string' && Number.isFinite(r.at)).map(r => ({ key: r.key, at: r.at }));
 }
-
-// Rival guardado: si le falta algo, se descarta.
 function sanitizeRival(r) {
     return r && r.key && r.name && r.stats && r.gear && Number.isFinite(r.reward) ? r : null;
 }
@@ -299,6 +291,8 @@ function buildPlayer(key, user, now) {
     return {
         key, name: user.name, score: user.score ?? 0, lastMsg: 0, lastClanMsg: 0,
         money: user.money ?? 0,
+        pouch: Math.max(0, user.pouch ?? 0),     // bolsa de dinero (ganancias de gangster).
+        statResets: user.statResets ?? 0,        // cuántas veces reinició sus estadísticas.
         energy: user.energy ?? MAX_ENERGY,
         energyAt: user.energyAt ?? now,
         mission: user.mission ?? null,
@@ -308,14 +302,14 @@ function buildPlayer(key, user, now) {
         statPoints: user.statPoints ?? 0,
         stats, cls,
         clanId: user.clanId ?? null,
-        clanName: null,                          // se completa al iniciar sesión.
+        clanName: null,
         clanRole: user.clanRole ?? 'miembro',
-        busy: false,                             // evita que dos acciones de clan/nombre se ejecuten a la vez.
-        rival: sanitizeRival(user.rival),        // rival buscado (se guarda: sobrevive a recargar la página).
-        fight: null,                             // pelea en curso.
-        searching: false,                        // true mientras se busca rival.
+        busy: false,
+        rival: sanitizeRival(user.rival),
+        fight: null,
+        searching: false,
         lastSearch: 0,
-        lastLookup: 0,                           // límite de velocidad de la búsqueda por nombre.
+        lastLookup: 0,
         searchCharges: Math.max(0, Math.min(SEARCH_MAX, user.searchCharges ?? SEARCH_MAX)),
         searchRechargeAt: user.searchRechargeAt ?? 0,
         nameChangedAt: user.nameChangedAt ?? 0,
@@ -327,7 +321,6 @@ function buildPlayer(key, user, now) {
     };
 }
 
-// Busca a un jugador CONECTADO por su key (ID interno).
 function findOnlineByKey(key) {
     const entry = Object.entries(online).find(([, p]) => p.key === key);
     return entry ? { id: entry[0], p: entry[1] } : null;
@@ -340,7 +333,7 @@ function emitToClan(clanId, event, data) {
     });
 }
 
-// Devuelve { clan, role } con el clan del jugador y su rango REAL, o null si no tiene clan.
+// Devuelve { clan, role } con el clan del jugador y su rango REAL (verificado contra la base).
 async function getClanAndRole(p) {
     if (!p.clanId) return null;
     const clan = await clans.findOne({ _id: p.clanId });
@@ -348,14 +341,13 @@ async function getClanAndRole(p) {
     return { clan, role: clan.owner === p.key ? 'lider' : p.clanRole };
 }
 
-// ¿Puede alguien con el rango "actorRole" expulsar o cambiar el rango de alguien con "targetRole"?
+// ¿Puede alguien con rango "actorRole" expulsar o cambiar el rango de alguien con "targetRole"?
 function canManage(actorRole, targetRole) {
     if (actorRole === 'lider') return targetRole !== 'lider';
     if (actorRole === 'colider') return targetRole === 'miembro' || targetRole === 'oficial';
     return false;
 }
 
-// Busca a un miembro de un clan y devuelve su rango real y si está conectado.
 async function findClanMember(clan, key) {
     const doc = await users.findOne({ _id: key, clanId: clan._id }, { projection: { clanRole: 1 } });
     if (!doc) return null;
@@ -370,12 +362,9 @@ async function findClanMember(clan, key) {
 // ============================================================
 
 function newUid() { return crypto.randomBytes(4).toString('hex'); }
-
-// Lado del maletín del jugador (3 o 5).
 function caseSize(p) { return p.caseExpanded ? CASE_EXPANDED : CASE_BASE; }
 
-// Agrega "qty" unidades de un objeto a la mochila (completando pilas y usando casillas libres).
-// Devuelve false (sin cambiar nada) si no hay lugar para todas.
+// Agrega "qty" unidades a la mochila. Devuelve false (sin cambiar nada) si no hay lugar para todas.
 function addToBag(p, id, qty) {
     const def = ITEMS[id];
     let room = (BAG_SLOTS - p.bag.length) * def.stackMax;
@@ -399,12 +388,11 @@ function addToBag(p, id, qty) {
     return true;
 }
 
-// ¿Dos rectángulos se pisan?
 function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
     return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
 }
 
-// ¿Entra el objeto "def" en la posición (x, y) del maletín? (ignoreUid: un objeto que se está moviendo)
+// ¿Entra el objeto "def" en la posición (x, y) del maletín?
 function canPlace(p, def, x, y, ignoreUid) {
     const size = caseSize(p);
     if (!def.w || x < 0 || y < 0 || x + def.w > size || y + def.h > size) return false;
@@ -416,7 +404,6 @@ function canPlace(p, def, x, y, ignoreUid) {
     return true;
 }
 
-// Primer lugar libre del maletín (de arriba a abajo, de izquierda a derecha).
 function findSpot(p, def) {
     const size = caseSize(p);
     for (let y = 0; y < size; y++) {
@@ -427,7 +414,7 @@ function findSpot(p, def) {
     return null;
 }
 
-// Qué ventajas da lo que hay en el maletín: el arma de mayor daño es la que cuenta.
+// Ventajas del maletín: el arma de mayor daño es la que cuenta.
 function gearOfItems(items) {
     let dmg = 0;
     let pistol = false;
@@ -443,21 +430,16 @@ function consumeGrenade(p) {
     const it = p.briefcase.find(i => i.id === 'granada' && i.qty > 0);
     if (!it) return false;
     it.qty--;
-    if (it.qty <= 0) p.briefcase = p.briefcase.filter(i => i !== it); // se acabó: libera el espacio.
+    if (it.qty <= 0) p.briefcase = p.briefcase.filter(i => i !== it);
     return true;
 }
 
-// Manda al jugador su mochila y su maletín.
 function sendInventory(socketId, p) {
     io.to(socketId).emit('inventory', {
-        bag: p.bag,
-        briefcase: p.briefcase,
-        caseSize: caseSize(p),
-        expanded: p.caseExpanded
+        bag: p.bag, briefcase: p.briefcase, caseSize: caseSize(p), expanded: p.caseExpanded
     });
 }
 
-// Después de cualquier cambio de objetos: avisamos, actualizamos el estado y guardamos.
 function afterInventoryChange(socketId, p) {
     sendInventory(socketId, p);
     sendState(socketId, p, Date.now());
@@ -465,7 +447,6 @@ function afterInventoryChange(socketId, p) {
 }
 
 // Sortea los objetos raros que caen al terminar una misión.
-// Devuelve la lista de los que cayeron ("lost" = la mochila estaba llena y se perdió).
 function rollDrops(p, mission) {
     const got = [];
     (mission.drops || []).forEach(d => {
@@ -481,19 +462,15 @@ function rollDrops(p, mission) {
 // TIENDA (cada jugador tiene la suya)
 // ============================================================
 
-// Un precio al azar entre PRICE_MIN y PRICE_MAX, en múltiplos de 10.
 function randPrice() {
     const steps = Math.floor((PRICE_MAX - PRICE_MIN) / 10);
     return PRICE_MIN + 10 * Math.floor(Math.random() * (steps + 1));
 }
-
-// Ofertas nuevas: una por objeto de la tienda, con precio al azar.
 function newOffers() {
     return SHOP_ITEMS.map(id => ({ id, price: randPrice(), bought: false }));
 }
 
 // Actualiza la tienda si pasó la hora (y repone las recargas manuales si pasó el día).
-// Devuelve true si algo cambió (para avisarle al jugador).
 function refreshShop(p, now) {
     let changed = false;
     const s = p.shop;
@@ -515,7 +492,6 @@ function refreshShop(p, now) {
     return changed;
 }
 
-// Lo que se le manda al navegador (tiempos RESTANTES, no horas absolutas).
 function shopPayload(p, now) {
     const s = p.shop;
     return {
@@ -528,16 +504,14 @@ function shopPayload(p, now) {
 }
 
 // ============================================================
-// GUERRA
+// GUERRA (1 contra 1)
 // ============================================================
 
-// Premio según la diferencia de nivel: contra alguien más alto, más; contra alguien más bajo, menos.
 function warReward(myLevel, rivalLevel) {
     const mult = Math.max(REWARD_MIN_MULT, Math.min(REWARD_MAX_MULT, 1 + (rivalLevel - myLevel) * REWARD_PER_LEVEL));
     return Math.round(WAR_REWARD * mult);
 }
 
-// BÚSQUEDAS: si pasó el tiempo de espera, vuelven las cargas.
 function refreshSearch(p, now) {
     if (p.searchCharges > 0) return;
     if (!p.searchRechargeAt) {
@@ -548,26 +522,22 @@ function refreshSearch(p, now) {
     }
 }
 
-// Gasta una carga de búsqueda. Si era la última, arranca la espera de 10 minutos.
 function useSearch(p, now) {
     p.searchCharges = Math.max(0, p.searchCharges - 1);
     if (p.searchCharges === 0) p.searchRechargeAt = now + SEARCH_RECHARGE_MS;
 }
 
-// Rivales que no se pueden atacar todavía (los de los últimos 20 minutos). Limpia los vencidos.
 function recentKeys(p, now) {
     p.recentAttacks = p.recentAttacks.filter(r => now - r.at < RIVAL_COOLDOWN_MS);
     return p.recentAttacks.map(r => r.key);
 }
 
-// Cuánto falta para poder volver a atacar a ese rival (0 = ya se puede).
 function cooldownLeft(p, key, now) {
     const r = p.recentAttacks.find(x => x.key === key);
     return r ? Math.max(0, r.at + RIVAL_COOLDOWN_MS - now) : 0;
 }
 
 // Busca un rival al azar cerca del nivel del jugador, ampliando el rango si no hay nadie.
-// Nunca devuelve a uno mismo ni a alguien atacado hace menos de 20 minutos.
 async function findRival(p, now) {
     const exclude = [p.key, ...recentKeys(p, now)];
     for (let i = 0; i < MATCH_RANGES.length; i++) {
@@ -596,11 +566,10 @@ function setRival(p, doc) {
     p.rival = {
         key: doc._id, name: doc.name, level, cls, stats,
         gear: gearOfItems(sanitizeCase(doc.briefcase)),
-        reward: warReward(p.level, level)   // el premio queda fijado desde acá.
+        reward: warReward(p.level, level)
     };
 }
 
-// Lo que se le muestra al jugador de su rival (con el daño del arma ya sumado).
 function rivalPayload(p, expanded) {
     const r = p.rival;
     return {
@@ -611,8 +580,8 @@ function rivalPayload(p, expanded) {
         pistol: r.gear.pistol,
         maxHp: r.stats.vida * HP_PER_VIDA,
         reward: r.reward,
-        levelDiff: r.level - p.level,   // positivo: está por encima tuyo.
-        expanded: !!expanded            // true si no había nadie cerca de tu nivel.
+        levelDiff: r.level - p.level,
+        expanded: !!expanded
     };
 }
 
@@ -624,26 +593,18 @@ function makeFighter(name, level, cls, stats, pistol, grenades) {
         maxHp, hp: maxHp,
         dano: stats.dano, aguante: stats.aguante, velocidad: stats.velocidad,
         inteligencia: stats.inteligencia, suerte: stats.suerte,
-        pistol: !!pistol,         // true = cada ataque es un disparo.
-        grenades: grenades || 0   // granadas que va a lanzar en sus primeras acciones.
+        pistol: !!pistol,
+        grenades: grenades || 0
     };
 }
 
 // Un golpe de "att" contra "def". Devuelve { result: 'hit' | 'crit' | 'dodge', dmg }.
 function resolveHit(att, def) {
-    // 1) ¿El defensor esquiva? (inteligencia)
     if (Math.random() < pct(def.inteligencia, DODGE_CAP, def.level)) return { result: 'dodge', dmg: 0 };
-
-    // 2) Daño base con una variación de ±15%.
     let dmg = att.dano * (0.85 + Math.random() * 0.3);
-
-    // 3) ¿Es crítico? (suerte del atacante)
     const crit = Math.random() < pct(att.suerte, CRIT_CAP, att.level);
     if (crit) dmg *= CRIT_MULT;
-
-    // 4) El aguante del defensor reduce el daño.
     dmg *= 1 - pct(def.aguante, ARMOR_CAP, def.level);
-
     dmg = Math.max(1, Math.round(dmg));
     def.hp = Math.max(0, def.hp - dmg);
     return { result: crit ? 'crit' : 'hit', dmg };
@@ -656,15 +617,13 @@ function resolveGrenade(def) {
     return { result: 'boom', dmg };
 }
 
-// Simula la pelea COMPLETA de una vez y devuelve la lista de golpes y el resultado.
+// Simula la pelea COMPLETA de una vez. Respeta la vida con la que llega cada luchador
+// (así sirve también para los duelos de la guerra de clanes, donde el ganador sigue herido).
 function simulateFight(me, rival) {
     const events = [];
     let actions = 0;
-
-    // Empieza el más veloz; si empatan, se sortea.
     let meTurn = me.velocidad !== rival.velocidad ? me.velocidad > rival.velocidad : Math.random() < 0.5;
 
-    // Una acción: granada (si le quedan) o golpe normal (con pistola si la lleva).
     const act = (att, def, actor, extra) => {
         let r;
         let weapon = null;
@@ -687,14 +646,12 @@ function simulateFight(me, rival) {
 
         act(att, def, actor, false);
 
-        // Turno extra (velocidad): una sola vez por turno, y solo si el rival sigue en pie.
         if (def.hp > 0 && actions < WAR_MAX_ACTIONS && Math.random() < pct(att.velocidad, EXTRA_TURN_CAP, att.level)) {
             act(att, def, actor, true);
         }
         meTurn = !meTurn;
     }
 
-    // Resultado: gana quien dejó al otro sin vida; si se acabaron los golpes, quien tiene más vida (%).
     let result;
     if (rival.hp <= 0) result = 'win';
     else if (me.hp <= 0) result = 'lose';
@@ -706,7 +663,6 @@ function simulateFight(me, rival) {
     return { events, result };
 }
 
-// Cada WAR_TURN_MS manda UN golpe al jugador. Cuando se acaban, cierra la pelea.
 function stepFight(socketId, p) {
     const f = p.fight;
     if (!f) return;
@@ -718,7 +674,6 @@ function stepFight(socketId, p) {
 }
 
 // Cierra la pelea, paga el premio si ganó y avisa al rival.
-// "instant" = true cuando el jugador se desconectó (no hay a quién mostrarle el final).
 function endFight(socketId, p, instant) {
     const f = p.fight;
     if (!f) return;
@@ -730,7 +685,6 @@ function endFight(socketId, p, instant) {
     const reward = f.result === 'win' ? f.reward : 0;
     p.money += reward;
 
-    // El rival recibe una notificación con el registro de la pelea (esté conectado o no).
     if (rv) notifyDefender(p, rv, f).catch(console.error);
 
     if (!instant) {
@@ -741,10 +695,10 @@ function endFight(socketId, p, instant) {
 }
 
 // Crea la notificación para el defensor y, si está conectado, se la manda al instante.
-// "result" está contado desde el punto de vista del ATACANTE ('win' = el atacante ganó).
 async function notifyDefender(p, rv, f) {
     const doc = {
         userId: rv.key,
+        type: 'attack',
         from: p.name,
         fromLevel: p.level,
         result: f.result,
@@ -759,18 +713,225 @@ async function notifyDefender(p, rv, f) {
 }
 
 // Convierte una notificación de la base en lo que se le manda al navegador.
+// Hay dos tipos: 'attack' (te atacaron, con registro) y 'clanwar' (resultado de una guerra de clanes, solo texto).
 function formatNote(d) {
     return {
-        id: String(d._id), from: d.from, fromLevel: d.fromLevel, result: d.result,
-        log: d.log, ts: d.createdAt.getTime(), read: !!d.read
+        id: String(d._id),
+        type: d.type || 'attack',
+        text: d.text || '',
+        from: d.from || '',
+        fromLevel: d.fromLevel || 0,
+        result: d.result || '',
+        log: d.log || [],
+        ts: d.createdAt.getTime(),
+        read: !!d.read
     };
+}
+
+// ============================================================
+// GUERRA DE CLANES
+// Flujo: el líder/colíder declara → cuenta regresiva de 1 minuto (todos se preparan) →
+// el servidor junta a TODOS los miembros de los dos clanes, los hace pelear uno a la vez
+// y guarda la repetición completa → los miembros del clan ganador reciben el premio.
+// ============================================================
+
+// Intenta "reservar" un clan: solo funciona si no tiene otra guerra en los últimos 10 minutos.
+async function lockClan(clanId, now, until) {
+    const r = await clans.updateOne(
+        { _id: clanId, $or: [{ warLockUntil: { $exists: false } }, { warLockUntil: { $lte: now } }] },
+        { $set: { warLockUntil: until } }
+    );
+    return r.matchedCount === 1;
+}
+
+// Resumen de una guerra para mandar al navegador (tiempos RESTANTES, no horas absolutas).
+function warPayload(war, status) {
+    return {
+        warId: war._id,
+        status: status || war.status,
+        attackerName: war.attackerName,
+        defenderName: war.defenderName,
+        winnerName: war.winnerName || null,
+        startsInMs: Math.max(0, war.startAt - Date.now())
+    };
+}
+
+// Avisa a los miembros conectados de los dos clanes.
+function emitWarUpdate(war, data) {
+    emitToClan(war.attackerId, 'clanWarUpdate', data);
+    emitToClan(war.defenderId, 'clanWarUpdate', data);
+}
+
+// Programa el momento en que arranca la guerra (cuando termina la cuenta regresiva).
+function scheduleClanWar(warId, startAt) {
+    clearTimeout(clanWarTimers[warId]);
+    clanWarTimers[warId] = setTimeout(() => {
+        resolveClanWar(warId).catch(e => console.error('Error en la guerra de clanes:', e));
+    }, Math.max(0, startAt - Date.now()));
+}
+
+// Junta a TODOS los miembros del clan (conectados o no) como luchadores.
+// Los conectados usan sus datos en vivo; los demás, lo guardado en la base.
+// Orden de pelea: de menor a mayor rango y nivel (el líder pelea último).
+async function buildClanTeam(clan) {
+    const docs = await users.find({ clanId: clan._id }).limit(CLAN_MAX_MEMBERS).toArray();
+    const team = docs.map(d => {
+        const live = findOnlineByKey(d._id);
+        const src = live ? live.p : d;
+        const { cls, stats } = live ? { cls: live.p.cls, stats: live.p.stats } : resolveStats(d);
+        const gear = gearOfItems(live ? live.p.briefcase : sanitizeCase(d.briefcase));
+        const stored = live ? live.p.clanRole : d.clanRole;
+        const role = d._id === clan.owner ? 'lider' : (ROLE_RANK[stored] !== undefined ? stored : 'miembro');
+        // Las granadas no se usan en las guerras de clanes (el último parámetro es 0); la pistola sí.
+        const f = makeFighter(src.name, src.level ?? 1, cls, { ...stats, dano: stats.dano + gear.dmg }, gear.pistol, 0);
+        f.key = d._id;
+        f.role = role;
+        return f;
+    });
+    team.sort((a, b) => ROLE_RANK[a.role] - ROLE_RANK[b.role] || a.level - b.level);
+    return team;
+}
+
+// Foto de un luchador para la repetición (con su vida al empezar el duelo).
+function snapFighter(f) {
+    return {
+        name: f.name, level: f.level, className: f.className, maxHp: f.maxHp, hp: f.hp, pistol: f.pistol,
+        stats: { vida: Math.round(f.maxHp / HP_PER_VIDA), dano: f.dano, aguante: f.aguante,
+                 velocidad: f.velocidad, inteligencia: f.inteligencia, suerte: f.suerte }
+    };
+}
+
+// Simula la guerra entera: el primero de A vs el primero de B; el que gana (con la vida que le queda)
+// se enfrenta al siguiente rival, hasta que un equipo se queda sin luchadores.
+function simulateClanWar(teamA, teamB) {
+    const duels = [];
+    let ia = 0;
+    let ib = 0;
+    while (ia < teamA.length && ib < teamB.length) {
+        const a = teamA[ia];
+        const b = teamB[ib];
+        const snapA = snapFighter(a);
+        const snapB = snapFighter(b);
+
+        const out = simulateFight(a, b); // modifica la vida de a y b.
+        // Ganador del duelo: el que dejó al otro sin vida; si se acabaron los golpes, el de más vida (%);
+        // si hay empate exacto, se sortea (así la guerra siempre avanza).
+        const winner = out.result === 'win' ? 'a' : out.result === 'lose' ? 'b' : (Math.random() < 0.5 ? 'a' : 'b');
+        const byTime = a.hp > 0 && b.hp > 0;   // nadie murió: ganó por tener más vida.
+        const loser = winner === 'a' ? b : a;
+        const champ = winner === 'a' ? a : b;
+        loser.hp = 0;
+        champ.hp = Math.min(champ.maxHp, champ.hp + Math.round(champ.maxHp * CLAN_WAR_HEAL_PCT));
+
+        // Eventos en formato compacto: [quién (0 = A, 1 = B), resultado (0 golpe, 1 crítico, 2 esquive),
+        // daño, turno extra, pistola, vida de A, vida de B].
+        const ev = out.events.map(e => [
+            e.actor === 'me' ? 0 : 1,
+            e.result === 'crit' ? 1 : e.result === 'dodge' ? 2 : 0,
+            e.dmg, e.extra ? 1 : 0, e.weapon === 'pistol' ? 1 : 0, e.hpMe, e.hpRival
+        ]);
+        duels.push({ ia, ib, a: snapA, b: snapB, ev, w: winner, t: byTime ? 1 : 0 });
+
+        if (winner === 'a') ib++; else ia++;
+    }
+    return { duels, winner: ia < teamA.length ? 'a' : 'b' };
+}
+
+// Paga el premio a UN miembro del clan ganador (esté conectado o no).
+async function giveWarReward(key) {
+    const live = findOnlineByKey(key);
+    if (live) {
+        // Conectado: se actualiza su memoria (el guardado automático no pisa el premio).
+        const p = live.p;
+        p.money += CLAN_WAR_REWARD;
+        p.fame += CLAN_WAR_FAME;
+        addXp(p, CLAN_WAR_XP);
+        sendState(live.id, p, Date.now());
+        saveProgress([p]).catch(console.error);
+        return;
+    }
+    // Desconectado: se actualiza directo en la base (la XP puede subirle de nivel).
+    const d = await users.findOne({ _id: key }, { projection: { money: 1, xp: 1, level: 1, fame: 1, statPoints: 1 } });
+    if (!d) return;
+    const t = {
+        money: (d.money ?? 0) + CLAN_WAR_REWARD, fame: (d.fame ?? 0) + CLAN_WAR_FAME,
+        xp: d.xp ?? 0, level: d.level ?? 1, statPoints: d.statPoints ?? 0
+    };
+    addXp(t, CLAN_WAR_XP);
+    await users.updateOne({ _id: key }, { $set: { money: t.money, fame: t.fame, xp: t.xp, level: t.level, statPoints: t.statPoints } });
+}
+
+// Crea la notificación del resultado para todos los miembros de los dos clanes.
+async function notifyWarMembers(war, keysA, keysB, winner) {
+    const winName = winner === 'a' ? war.attackerName : war.defenderName;
+    const loseName = winner === 'a' ? war.defenderName : war.attackerName;
+    const now = new Date();
+    const base = { type: 'clanwar', warId: war._id, read: false, createdAt: now };
+    const docs = [
+        ...(winner === 'a' ? keysA : keysB).map(k => ({ ...base, userId: k,
+            text: `🏆 ¡${winName} venció a ${loseName} en la guerra de clanes! Ganaste 💵 ${CLAN_WAR_REWARD}, ⭐ ${CLAN_WAR_FAME} de fama y ✨ ${CLAN_WAR_XP} XP.` })),
+        ...(winner === 'a' ? keysB : keysA).map(k => ({ ...base, userId: k,
+            text: `💀 ${loseName} perdió la guerra de clanes contra ${winName}.` }))
+    ];
+    if (!docs.length) return;
+    const res = await notifications.insertMany(docs);
+    docs.forEach((d, i) => {
+        const live = findOnlineByKey(d.userId);
+        if (live) io.to(live.id).emit('notification', formatNote({ ...d, _id: res.insertedIds[i] }));
+    });
+}
+
+// Cancela una guerra (por ejemplo si uno de los clanes dejó de existir).
+async function cancelClanWar(war, message) {
+    await clanWars.updateOne({ _id: war._id }, { $set: { status: 'cancelled' } });
+    emitWarUpdate(war, { ...warPayload(war, 'cancelled'), message });
+}
+
+// Termina la cuenta regresiva: arma los equipos, simula la guerra, guarda la repetición y paga los premios.
+async function resolveClanWar(warId) {
+    delete clanWarTimers[warId];
+
+    // "Tomamos" la guerra una sola vez (si ya la tomó otro proceso, no hacemos nada).
+    const claim = await clanWars.updateOne({ _id: warId, status: 'prep' }, { $set: { status: 'running' } });
+    if (claim.modifiedCount !== 1) return;
+    const war = await clanWars.findOne({ _id: warId });
+
+    const clanA = await clans.findOne({ _id: war.attackerId });
+    const clanB = await clans.findOne({ _id: war.defenderId });
+    if (!clanA || !clanB) return cancelClanWar(war, 'Uno de los clanes ya no existe: la guerra se canceló.');
+
+    const teamA = await buildClanTeam(clanA);
+    const teamB = await buildClanTeam(clanB);
+    if (!teamA.length || !teamB.length) return cancelClanWar(war, 'Uno de los clanes se quedó sin miembros: la guerra se canceló.');
+
+    // Listas de participantes (en orden de pelea) y sus IDs, antes de que la simulación les cambie la vida.
+    const rosterOf = (team) => team.map(f => ({ name: f.name, level: f.level, role: f.role }));
+    const rosterA = rosterOf(teamA);
+    const rosterB = rosterOf(teamB);
+    const keysA = teamA.map(f => f.key);
+    const keysB = teamB.map(f => f.key);
+
+    const sim = simulateClanWar(teamA, teamB);
+    const winnerName = sim.winner === 'a' ? war.attackerName : war.defenderName;
+
+    // Primero guardamos la guerra como terminada (así los premios nunca se pagan dos veces)...
+    await clanWars.updateOne({ _id: warId }, { $set: {
+        status: 'done', winner: sim.winner, winnerName, rosterA, rosterB, duels: sim.duels, finishedAt: new Date()
+    } });
+    // ...y recién después pagamos a los miembros del clan ganador.
+    const winnerKeys = sim.winner === 'a' ? keysA : keysB;
+    await Promise.all(winnerKeys.map(k => giveWarReward(k).catch(console.error)));
+    await notifyWarMembers(war, keysA, keysB, sim.winner).catch(console.error);
+
+    await refreshTop();      // la fama cambió: se actualizan los rankings.
+    broadcastSlow();
+    emitWarUpdate(war, { ...warPayload(war, 'done'), winnerName });
 }
 
 // ============================================================
 // RANKINGS Y GUARDADO
 // ============================================================
 
-// Recarga los rankings desde MongoDB (cada 10 s y cuando cambian los clanes o nombres).
 async function refreshTop() {
     try {
         topScoreCache = await users
@@ -795,7 +956,6 @@ async function refreshTop() {
     } catch (e) { console.error(e); }
 }
 
-// Ranking de ACTIVIDAD: conectados (puntaje en vivo) + desconectados (de la base).
 function buildActivityRanking() {
     const onlineList = Object.values(online);
     const onlineKeys = new Set(onlineList.map(p => p.key));
@@ -808,7 +968,6 @@ function buildActivityRanking() {
     ].sort((a, b) => b.score - a.score);
 }
 
-// Ranking de FAMA: igual, mezclando valores en vivo y guardados.
 function buildFameRanking() {
     const onlineList = Object.values(online);
     const onlineKeys = new Set(onlineList.map(p => p.key));
@@ -821,12 +980,10 @@ function buildFameRanking() {
     ].sort((a, b) => b.fame - a.fame || b.level - a.level).slice(0, 50);
 }
 
-// Manda el ranking de actividad a TODOS (cada segundo, porque el puntaje sube en vivo).
 function broadcast() {
     io.emit('players', buildActivityRanking());
 }
 
-// Manda los rankings de fama y clanes a TODOS (cada 10 s, cambian más lento).
 function broadcastSlow() {
     io.emit('fameRanking', buildFameRanking());
     io.emit('clanRanking', clanCache);
@@ -841,6 +998,8 @@ async function saveProgress(list) {
             update: { $set: {
                 score: p.score,
                 money: p.money,
+                pouch: p.pouch,
+                statResets: p.statResets,
                 energy: p.energy,
                 energyAt: p.energyAt,
                 mission: p.mission,
@@ -865,7 +1024,6 @@ async function saveProgress(list) {
     })));
 }
 
-// ENERGÍA: se calcula según el tiempo pasado, no con un contador.
 function refreshEnergy(p, now) {
     if (p.energy >= MAX_ENERGY) {
         p.energy = MAX_ENERGY;
@@ -889,12 +1047,11 @@ function finishMissionIfDone(p, now) {
     p.money += mission.reward;
     p.fame += mission.fame;
     const levelsGained = addXp(p, mission.xp);
-    const items = rollDrops(p, mission);   // objetos raros (casi siempre vacío).
+    const items = rollDrops(p, mission);
 
     return { name: mission.name, reward: mission.reward, xp: mission.xp, fame: mission.fame, levelsGained, level: p.level, items };
 }
 
-// Texto que explica qué hace cada estadística con su valor TOTAL y nivel actuales.
 function describeStats(s, level) {
     const pc = (v) => Math.round(v * 100);
     return {
@@ -910,10 +1067,12 @@ function describeStats(s, level) {
 // Arma el "estado personal" que se le manda a UN jugador (solo suyo).
 function buildState(p, now) {
     const mission = p.mission ? MISSIONS.find(m => m.id === p.mission.id) : null;
-    const gear = gearOfItems(p.briefcase);                      // ventajas del maletín.
-    const total = { ...p.stats, dano: p.stats.dano + gear.dmg }; // estadísticas con el equipo sumado.
+    const gear = gearOfItems(p.briefcase);
+    const total = { ...p.stats, dano: p.stats.dano + gear.dmg };
     return {
         money: p.money,
+        pouch: p.pouch,                          // bolsa de dinero reclamable.
+        resetCost: resetCost(p),                 // precio del próximo reinicio de estadísticas.
         energy: p.energy,
         maxEnergy: MAX_ENERGY,
         nextEnergyMs: p.energy >= MAX_ENERGY ? 0 : Math.max(0, ENERGY_REGEN_MS - (now - p.energyAt)),
@@ -922,9 +1081,9 @@ function buildState(p, now) {
         xpNeeded: xpNeeded(p.level),
         fame: p.fame,
         statPoints: p.statPoints,
-        stats: p.stats,                        // base (la que se compra y se sube).
-        bonus: gear.dmg ? { dano: gear.dmg } : {}, // extra que da el maletín.
-        totalStats: total,                     // base + extra (la que se usa para pelear).
+        stats: p.stats,
+        bonus: gear.dmg ? { dano: gear.dmg } : {},
+        totalStats: total,
         effects: describeStats(total, p.level),
         maxHp: total.vida * HP_PER_VIDA,
         className: CLASSES[p.cls].name,
@@ -941,7 +1100,6 @@ function buildState(p, now) {
     };
 }
 
-// Envía el estado personal a un jugador puntual (por su socketId).
 function sendState(socketId, p, now) {
     io.to(socketId).emit('state', buildState(p, now));
 }
@@ -950,7 +1108,6 @@ function sendState(socketId, p, now) {
 // SOCKET.IO: se ejecuta cada vez que un cliente se conecta
 // ============================================================
 io.on('connection', (socket) => {
-    // Apenas entra (aunque no se haya logueado) ve los rankings.
     socket.emit('players', buildActivityRanking());
     socket.emit('fameRanking', buildFameRanking());
     socket.emit('clanRanking', clanCache);
@@ -982,32 +1139,19 @@ io.on('connection', (socket) => {
                 if (data?.noCreate) {
                     return cb({ ok: false, error: 'No encontramos tu usuario. Iniciá sesión de nuevo.' });
                 }
-                // Usuario nuevo: ID interno aleatorio (fijo para siempre) + nombre aparte.
                 const salt = crypto.randomBytes(16).toString('hex');
                 user = {
                     _id: crypto.randomBytes(8).toString('hex'),
                     nameKey, name, salt, hash: hashPassword(password, salt),
-                    score: 0,
-                    money: 0,
-                    energy: MAX_ENERGY,
-                    energyAt: now,
-                    mission: null,
-                    level: 1,
-                    xp: 0,
-                    fame: 0,
-                    statPoints: 0,
+                    score: 0, money: 0, pouch: 0, statResets: 0,
+                    energy: MAX_ENERGY, energyAt: now, mission: null,
+                    level: 1, xp: 0, fame: 0, statPoints: 0,
                     class: DEFAULT_CLASS,
                     stats: { ...CLASSES[DEFAULT_CLASS].stats },
-                    clanId: null,
-                    clanRole: 'miembro',
-                    searchCharges: SEARCH_MAX,
-                    searchRechargeAt: 0,
-                    bag: [],
-                    briefcase: [],
-                    caseExpanded: false,
-                    shop: null,
-                    rival: null,
-                    recentAttacks: []
+                    clanId: null, clanRole: 'miembro',
+                    searchCharges: SEARCH_MAX, searchRechargeAt: 0,
+                    bag: [], briefcase: [], caseExpanded: false,
+                    shop: null, rival: null, recentAttacks: []
                 };
                 try {
                     await users.insertOne(user);
@@ -1019,7 +1163,6 @@ io.on('connection', (socket) => {
 
             const player = buildPlayer(user._id, user, now);
 
-            // Si tiene clan, buscamos su nombre. Si el clan ya no existe, lo sacamos.
             if (player.clanId) {
                 const clan = await clans.findOne({ _id: player.clanId });
                 if (clan) player.clanName = clan.name;
@@ -1031,13 +1174,12 @@ io.on('connection', (socket) => {
             }
             online[socket.id] = player;
 
-            // Ponemos al día lo que pasó mientras estaba desconectado:
             refreshEnergy(player, now);
             refreshSearch(player, now);
             refreshShop(player, now);
             const finished = finishMissionIfDone(player, now);
 
-            cb({ ok: true, name: user.name });  // login correcto.
+            cb({ ok: true, name: user.name });
 
             // Configuración que necesita el navegador para dibujar la interfaz.
             socket.emit('config', {
@@ -1048,13 +1190,21 @@ io.on('connection', (socket) => {
                 pointsPerLevel: POINTS_PER_LEVEL,
                 chatTtlMs: CHAT_TTL_SECONDS * 1000,
                 statCost: STAT_COST,
+                resetStatsBase: RESET_STATS_COST,
+                pouchPerSecond: POUCH_PER_SECOND,
                 warEnergy: WAR_ENERGY,
                 warReward: WAR_REWARD,
+                warTurnMs: WAR_TURN_MS,
                 searchMax: SEARCH_MAX,
                 searchRechargeMs: SEARCH_RECHARGE_MS,
                 rivalCooldownMs: RIVAL_COOLDOWN_MS,
                 nameCooldownMs: NAME_COOLDOWN_MS,
                 clanRulesMax: CLAN_RULES_MAX,
+                clanWarPrepMs: CLAN_WAR_PREP_MS,
+                clanWarCooldownMs: CLAN_WAR_COOLDOWN_MS,
+                clanWarReward: CLAN_WAR_REWARD,
+                clanWarFame: CLAN_WAR_FAME,
+                clanWarXp: CLAN_WAR_XP,
                 bagSlots: BAG_SLOTS,
                 caseExpandCost: CASE_EXPAND_COST,
                 caseExpandLevel: CASE_EXPAND_LEVEL,
@@ -1066,37 +1216,86 @@ io.on('connection', (socket) => {
             sendState(socket.id, player, now);
             sendInventory(socket.id, player);
             socket.emit('shop', shopPayload(player, now));
-            // Si había buscado un rival antes de recargar la página, se lo mostramos de nuevo.
             if (player.rival) socket.emit('rivalFound', rivalPayload(player, false));
+
+            // Si su clan está en plena cuenta regresiva de una guerra, se lo avisamos.
+            if (player.clanId) {
+                const prep = await clanWars.findOne({
+                    status: 'prep', $or: [{ attackerId: player.clanId }, { defenderId: player.clanId }]
+                });
+                if (prep) socket.emit('clanWarUpdate', warPayload(prep));
+            }
+
             if (finished) {
                 socket.emit('missionDone', finished);
                 try { await saveProgress([player]); } catch (e) { console.error(e); }
             }
             broadcast();
 
-            // Notificaciones de ataques recibidos (las últimas NOTIF_MAX).
+            // Notificaciones (ataques recibidos y resultados de guerras de clanes).
             const notes = await notifications.find({ userId: player.key }).sort({ createdAt: -1 }).limit(NOTIF_MAX).toArray();
             socket.emit('notifications', notes.map(formatNote));
 
             // Historial del chat global: solo los últimos 30 minutos (máximo 50 mensajes).
             const since = Date.now() - CHAT_TTL_SECONDS * 1000;
             const last = await messages.find({ ts: { $gte: since } }).sort({ ts: -1 }).limit(50).toArray();
-            socket.emit('chatHistory', last.reverse().map(m => ({
-                name: m.name, text: m.text, ts: m.ts
-            })));
+            socket.emit('chatHistory', last.reverse().map(m => ({ name: m.name, text: m.text, ts: m.ts })));
         } catch (err) {
             console.error(err);
             cb({ ok: false, error: 'Error del servidor, probá de nuevo.' });
         }
     });
 
-    // ---------- MARCAR NOTIFICACIONES COMO LEÍDAS ----------
     socket.on('readNotifications', async () => {
         const p = online[socket.id];
         if (!p) return;
         try {
             await notifications.updateMany({ userId: p.key, read: false }, { $set: { read: true } });
         } catch (e) { console.error(e); }
+    });
+
+    // ---------- BOLSA DE DINERO: RECLAMAR LAS GANANCIAS ----------
+    socket.on('claimPouch', (cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+
+        const amount = Math.floor(p.pouch);
+        if (amount < 1) return reply({ ok: false, error: 'La bolsa está vacía. Esperá a que se llene.' });
+
+        p.money += amount;   // el dinero pasa a tu billetera...
+        p.pouch = 0;         // ...y la bolsa vuelve a empezar desde cero.
+
+        sendState(socket.id, p, Date.now());
+        saveProgress([p]).catch(console.error);
+        reply({ ok: true, amount });
+    });
+
+    // ---------- REINICIAR ESTADÍSTICAS ----------
+    // Vuelven a las básicas de la clase (hoy, Matón) y TODOS los demás puntos quedan libres para repartir.
+    // Cuesta 500 la primera vez, 1000 la segunda, 1500 la tercera...
+    socket.on('resetStats', (cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.fight) return reply({ ok: false, error: 'No podés reiniciar tus estadísticas en plena pelea.' });
+
+        const cost = resetCost(p);
+        if (p.money < cost) return reply({ ok: false, error: `Necesitás 💵 ${cost} para reiniciar tus estadísticas.` });
+
+        const base = CLASSES[p.cls].stats;
+        const sum = (obj) => STAT_IDS.reduce((acc, id) => acc + obj[id], 0);
+        // Puntos totales que tiene hoy el jugador (repartidos + sin repartir), menos lo que ya traen las básicas.
+        const freePoints = Math.max(0, sum(p.stats) + p.statPoints - sum(base));
+
+        p.money -= cost;
+        p.statResets++;
+        p.stats = { ...base };
+        p.statPoints = freePoints;
+
+        sendState(socket.id, p, Date.now());
+        saveProgress([p]).catch(console.error);
+        reply({ ok: true, cost, points: freePoints });
     });
 
     // ---------- CAMBIAR MI NOMBRE DE USUARIO ----------
@@ -1144,7 +1343,6 @@ io.on('connection', (socket) => {
     // ---------- EMPEZAR UNA MISIÓN ----------
     socket.on('startMission', async (missionId, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
-
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
 
@@ -1155,23 +1353,19 @@ io.on('connection', (socket) => {
         refreshEnergy(p, now);
 
         if (p.mission) return reply({ ok: false, error: 'Ya estás haciendo una misión.' });
-        if (p.energy < mission.energy) {
-            return reply({ ok: false, error: 'No tenés suficiente energía.' });
-        }
+        if (p.energy < mission.energy) return reply({ ok: false, error: 'No tenés suficiente energía.' });
 
         p.energy -= mission.energy;
         p.mission = { id: mission.id, endsAt: now + mission.durationMs };
 
         sendState(socket.id, p, now);
         reply({ ok: true });
-
         try { await saveProgress([p]); } catch (e) { console.error(e); }
     });
 
-    // ---------- GASTAR UN PUNTO DE ESTADÍSTICA (de los que da cada nivel) ----------
+    // ---------- GASTAR UN PUNTO DE ESTADÍSTICA ----------
     socket.on('spendStat', async (statId, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
-
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
         if (!STAT_IDS.includes(statId)) return reply({ ok: false, error: 'Esa estadística no existe.' });
@@ -1182,14 +1376,12 @@ io.on('connection', (socket) => {
 
         sendState(socket.id, p, Date.now());
         reply({ ok: true });
-
         try { await saveProgress([p]); } catch (e) { console.error(e); }
     });
 
     // ---------- COMPRAR UN PUNTO DE ESTADÍSTICA CON DINERO ----------
     socket.on('buyStat', async (statId, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
-
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
         if (!STAT_IDS.includes(statId)) return reply({ ok: false, error: 'Esa estadística no existe.' });
@@ -1200,20 +1392,17 @@ io.on('connection', (socket) => {
 
         sendState(socket.id, p, Date.now());
         reply({ ok: true });
-
         try { await saveProgress([p]); } catch (e) { console.error(e); }
     });
 
     // ---------- TIENDA: COMPRAR UNA OFERTA ----------
-    // data = { id, price }. Mandamos también el precio que el jugador VIO: si la tienda
-    // se actualizó justo antes, no le cobramos un precio distinto sin avisar.
     socket.on('buyOffer', (data, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
 
         const now = Date.now();
-        if (refreshShop(p, now)) socket.emit('shop', shopPayload(p, now)); // por si se venció la hora.
+        if (refreshShop(p, now)) socket.emit('shop', shopPayload(p, now));
 
         const offer = p.shop.offers.find(o => o.id === data?.id);
         if (!offer) return reply({ ok: false, error: 'Esa oferta no existe.' });
@@ -1221,10 +1410,7 @@ io.on('connection', (socket) => {
         if (offer.bought) return reply({ ok: false, error: 'Ya compraste esta oferta. Esperá a que se actualice la tienda.' });
         if (p.money < offer.price) return reply({ ok: false, error: `Te faltan 💵 ${offer.price - p.money}.` });
 
-        // Primero vemos si entra en la mochila; recién ahí cobramos (todo sin esperas en el medio).
-        if (!addToBag(p, offer.id, ITEMS[offer.id].shopQty)) {
-            return reply({ ok: false, error: 'Tu mochila está llena.' });
-        }
+        if (!addToBag(p, offer.id, ITEMS[offer.id].shopQty)) return reply({ ok: false, error: 'Tu mochila está llena.' });
         p.money -= offer.price;
         offer.bought = true;
 
@@ -1245,7 +1431,7 @@ io.on('connection', (socket) => {
             return reply({ ok: false, error: `Ya usaste tus ${SHOP_MANUAL_MAX} recargas de hoy. Se reponen en ${fmtWait(p.shop.manualResetAt - now)}.` });
         }
         p.shop.manualLeft--;
-        if (!p.shop.manualResetAt) p.shop.manualResetAt = now + SHOP_MANUAL_RESET_MS; // arranca el reloj del día.
+        if (!p.shop.manualResetAt) p.shop.manualResetAt = now + SHOP_MANUAL_RESET_MS;
         p.shop.offers = newOffers();
         p.shop.nextAt = now + SHOP_REFRESH_MS;
 
@@ -1279,7 +1465,6 @@ io.on('connection', (socket) => {
     });
 
     // ---------- MALETÍN: PONER UN OBJETO (de la mochila al maletín) ----------
-    // data = { idx, x, y }. Sin x e y, se coloca en el primer lugar libre.
     socket.on('placeInCase', (data, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1301,8 +1486,8 @@ io.on('connection', (socket) => {
             if (!spot) return reply({ ok: false, error: 'No hay lugar en el maletín. Sacá algo o expandilo.' });
         }
 
-        p.bag.splice(idx, 1); // sale de la mochila (la pila entera)...
-        p.briefcase.push({ uid: newUid(), id: stack.id, qty: stack.qty, x: spot.x, y: spot.y }); // ...y entra al maletín.
+        p.bag.splice(idx, 1);
+        p.briefcase.push({ uid: newUid(), id: stack.id, qty: stack.qty, x: spot.x, y: spot.y });
         afterInventoryChange(socket.id, p);
         reply({ ok: true });
     });
@@ -1359,7 +1544,6 @@ io.on('connection', (socket) => {
     // ---------- GUERRA: BUSCAR RIVAL AL AZAR (gasta 1 de las 3 cargas) ----------
     socket.on('searchRival', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
-
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
         if (p.fight) return reply({ ok: false, error: 'Estás en medio de una pelea.' });
@@ -1376,17 +1560,14 @@ io.on('connection', (socket) => {
         p.searching = true;
         try {
             const result = await findRival(p, now);
-
             if (p.fight) return reply({ ok: false, error: 'Estás en medio de una pelea.' });
             if (!result) return reply({ ok: false, error: 'No hay rivales disponibles ahora (o ya peleaste con todos hace poco).' });
 
-            // Recién ahora, que SÍ encontramos a alguien, gastamos la carga.
             useSearch(p, Date.now());
             setRival(p, result.doc);
 
             sendState(socket.id, p, Date.now());
-            saveProgress([p]).catch(console.error); // guarda las cargas Y el rival.
-
+            saveProgress([p]).catch(console.error);
             reply({ ok: true, rival: rivalPayload(p, result.expanded) });
         } catch (e) {
             console.error(e);
@@ -1410,7 +1591,6 @@ io.on('connection', (socket) => {
         if (q.length < 2) return reply({ ok: false, error: 'Escribí al menos 2 letras.' });
 
         try {
-            // Escapamos los símbolos especiales para que lo escrito se busque como texto común.
             const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
             const docs = await users
                 .find({ nameKey: rx, _id: { $ne: p.key } }, { projection: { name: 1, level: 1, class: 1 } })
@@ -1423,7 +1603,7 @@ io.on('connection', (socket) => {
                     name: d.name,
                     level: d.level ?? 1,
                     className: CLASSES[CLASSES[d.class] ? d.class : DEFAULT_CLASS].name,
-                    cooldownMs: cooldownLeft(p, d._id, now)   // > 0: todavía no se puede atacar.
+                    cooldownMs: cooldownLeft(p, d._id, now)
                 }))
             });
         } catch (e) {
@@ -1478,7 +1658,6 @@ io.on('connection', (socket) => {
     // ---------- GUERRA: PELEAR (cuesta energía) ----------
     socket.on('startFight', (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
-
         const p = online[socket.id];
         if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
         if (p.fight) return reply({ ok: false, error: 'Ya estás peleando.' });
@@ -1488,30 +1667,25 @@ io.on('connection', (socket) => {
         refreshEnergy(p, now);
         if (p.energy < WAR_ENERGY) return reply({ ok: false, error: `Necesitás ${WAR_ENERGY} de energía para pelear.` });
 
-        // No se puede volver a atacar al mismo rival durante 20 minutos.
         const wait = cooldownLeft(p, p.rival.key, now);
         if (wait > 0) {
             return reply({ ok: false, error: `Ya peleaste con ese jugador hace poco. Podés volver a atacarlo en ${fmtWait(wait)}.` });
         }
 
-        // Cobramos la energía y anotamos el ataque (para el bloqueo de 20 minutos).
         p.energy -= WAR_ENERGY;
-        recentKeys(p, now); // limpia los vencidos.
+        recentKeys(p, now);
         p.recentAttacks.push({ key: p.rival.key, at: now });
 
-        // Equipo del maletín: suma daño, habilita la pistola y se gasta 1 granada si hay.
         const gear = gearOfItems(p.briefcase);
         const grenades = consumeGrenade(p) ? GRENADES_PER_FIGHT : 0;
         if (grenades) sendInventory(socket.id, p);
 
-        // Armamos los dos luchadores (con el daño del arma ya sumado) y simulamos TODA la pelea.
         const myTotal = { ...p.stats, dano: p.stats.dano + gear.dmg };
         const rvTotal = { ...p.rival.stats, dano: p.rival.stats.dano + p.rival.gear.dmg };
         const me = makeFighter(p.name, p.level, p.cls, myTotal, gear.pistol, grenades);
         const rv = makeFighter(p.rival.name, p.rival.level, p.rival.cls, rvTotal, p.rival.gear.pistol, 0);
         const outcome = simulateFight(me, rv);
 
-        // Guardamos la pelea (con el premio ya fijado) y mandamos un golpe cada WAR_TURN_MS.
         p.fight = { events: outcome.events, result: outcome.result, index: 0, timer: null, reward: p.rival.reward };
         p.fight.timer = setInterval(() => stepFight(socket.id, p), WAR_TURN_MS);
 
@@ -1522,7 +1696,6 @@ io.on('connection', (socket) => {
 
     // ---------- CLANES ----------
 
-    // Crear un clan (requiere nivel CLAN_CREATE_LEVEL). El creador queda como líder.
     socket.on('createClan', async (rawName, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1562,7 +1735,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Unirse a un clan (requiere nivel CLAN_JOIN_LEVEL).
     socket.on('joinClan', async (clanKey, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1596,7 +1768,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Salir del clan. Si era el líder, hereda un Colíder (o, si no hay, un Oficial, o cualquier miembro);
+    // Salir del clan. Si era el líder, hereda un Colíder (o un Oficial, o cualquier miembro);
     // si no queda nadie, se borra el clan y su chat.
     socket.on('leaveClan', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
@@ -1639,7 +1811,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // CAMBIAR EL NOMBRE DEL CLAN (solo el líder).
     socket.on('renameClan', async (rawName, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1684,7 +1855,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // EDITAR LAS REGLAS DEL CLAN (líder y colíderes).
     socket.on('setClanRules', async (rawText, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1704,7 +1874,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // EXPULSAR a un miembro (líder y colíderes, según el rango del expulsado).
     socket.on('kickMember', async (targetKey, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1748,7 +1917,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // CAMBIAR EL RANGO de un miembro. data = { key, role }.
     socket.on('setMemberRole', async (data, cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1817,9 +1985,140 @@ io.on('connection', (socket) => {
             members.sort((a, b) => ROLE_RANK[b.role] - ROLE_RANK[a.role] || b.level - a.level);
 
             const me = members.find(m => m.key === p.key);
+            reply({ ok: true, clan: { name: clan.name, rules: clan.rules || '', myRole: me ? me.role : 'miembro', members } });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        }
+    });
+
+    // ---------- GUERRA DE CLANES ----------
+
+    // Datos de la pestaña "Guerra de clan": clanes a los que se puede atacar, guerra en preparación e historial.
+    socket.on('getClanWarPanel', async (cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p || !p.clanId) return reply({ ok: false, error: 'No pertenecés a ningún clan.' });
+        try {
+            const ctx = await getClanAndRole(p);
+            if (!ctx) return reply({ ok: false, error: 'No pertenecés a ningún clan.' });
+            const mine = ctx.clan;
+            const now = Date.now();
+
+            // Candidatos: los clanes del ranking (menos el mío), con lo que falta para que se puedan atacar.
+            const others = clanCache.filter(c => c.id !== mine._id);
+            const docs = await clans.find({ _id: { $in: others.map(c => c.id) } }, { projection: { warLockUntil: 1 } }).toArray();
+            const locks = new Map(docs.map(d => [d._id, d.warLockUntil || 0]));
+            const candidates = others.map(c => ({
+                id: c.id, name: c.name, members: c.members, fame: c.fame,
+                lockMs: Math.max(0, (locks.get(c.id) || 0) - now)
+            }));
+
+            const mineFilter = { $or: [{ attackerId: mine._id }, { defenderId: mine._id }] };
+            const prep = await clanWars.findOne({ status: 'prep', ...mineFilter });
+            const wars = await clanWars
+                .find({ status: 'done', ...mineFilter }, { projection: { attackerName: 1, defenderName: 1, attackerId: 1, defenderId: 1, winner: 1, winnerName: 1, finishedAt: 1 } })
+                .sort({ createdAt: -1 }).limit(CLAN_WAR_HISTORY).toArray();
+
             reply({
                 ok: true,
-                clan: { name: clan.name, rules: clan.rules || '', myRole: me ? me.role : 'miembro', members }
+                canDeclare: MANAGER_ROLES.includes(ctx.role),
+                lockMs: Math.max(0, (mine.warLockUntil || 0) - now),
+                candidates,
+                prep: prep ? warPayload(prep) : null,
+                wars: wars.map(w => ({
+                    id: w._id,
+                    attackerName: w.attackerName,
+                    defenderName: w.defenderName,
+                    winnerName: w.winnerName,
+                    won: (w.winner === 'a' ? w.attackerId : w.defenderId) === mine._id,
+                    ts: w.finishedAt ? w.finishedAt.getTime() : 0
+                }))
+            });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        }
+    });
+
+    // DECLARAR una guerra (solo líder y colíderes). Empieza tras 1 minuto de preparación.
+    socket.on('declareClanWar', async (targetId, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        if (p.busy) return reply({ ok: false, error: 'Esperá un momento.' });
+        p.busy = true;
+        try {
+            const ctx = await getClanAndRole(p); // el rango se verifica EN EL SERVIDOR.
+            if (!ctx || !MANAGER_ROLES.includes(ctx.role)) {
+                return reply({ ok: false, error: 'Solo el líder y los colíderes pueden declarar guerras.' });
+            }
+            const mine = ctx.clan;
+            const target = await clans.findOne({ _id: String(targetId || '') });
+            if (!target) return reply({ ok: false, error: 'Ese clan no existe.' });
+            if (target._id === mine._id) return reply({ ok: false, error: 'No podés declararle la guerra a tu propio clan.' });
+            if (!(await users.countDocuments({ clanId: target._id }))) return reply({ ok: false, error: 'Ese clan no tiene miembros.' });
+
+            const now = Date.now();
+            if ((mine.warLockUntil || 0) > now) {
+                return reply({ ok: false, error: `Tu clan ya participó en una guerra hace poco. Podrá declarar otra en ${fmtWait(mine.warLockUntil - now)}.` });
+            }
+            if ((target.warLockUntil || 0) > now) {
+                return reply({ ok: false, error: `Ese clan ya participó en una guerra hace poco. Podés atacarlo en ${fmtWait(target.warLockUntil - now)}.` });
+            }
+
+            // Reservamos los DOS clanes por 10 minutos. Si dos líderes declaran a la vez, solo uno lo logra.
+            const until = now + CLAN_WAR_COOLDOWN_MS;
+            if (!(await lockClan(mine._id, now, until))) {
+                return reply({ ok: false, error: 'Tu clan ya está en una guerra. Esperá unos minutos.' });
+            }
+            if (!(await lockClan(target._id, now, until))) {
+                await clans.updateOne({ _id: mine._id }, { $set: { warLockUntil: mine.warLockUntil || 0 } }); // deshacemos la reserva.
+                return reply({ ok: false, error: 'Ese clan acaba de entrar en otra guerra.' });
+            }
+
+            const war = {
+                _id: crypto.randomBytes(8).toString('hex'),
+                status: 'prep',
+                attackerId: mine._id, defenderId: target._id,
+                attackerName: mine.name, defenderName: target.name,
+                declaredBy: p.name,
+                startAt: now + CLAN_WAR_PREP_MS,
+                createdAt: new Date(now)
+            };
+            await clanWars.insertOne(war);
+            scheduleClanWar(war._id, war.startAt);
+            emitWarUpdate(war, warPayload(war)); // aviso a todos los miembros conectados de los dos clanes.
+            reply({ ok: true, startsInMs: CLAN_WAR_PREP_MS });
+        } catch (e) {
+            console.error(e);
+            reply({ ok: false, error: 'Error del servidor, probá de nuevo.' });
+        } finally {
+            p.busy = false;
+        }
+    });
+
+    // Repetición completa de una guerra (solo para miembros de los dos clanes que pelearon).
+    socket.on('getClanWarReplay', async (warId, cb) => {
+        const reply = typeof cb === 'function' ? cb : () => {};
+        const p = online[socket.id];
+        if (!p) return reply({ ok: false, error: 'Tenés que iniciar sesión.' });
+        try {
+            const war = await clanWars.findOne({ _id: String(warId || ''), status: 'done' });
+            if (!war) return reply({ ok: false, error: 'Esa guerra no existe (o ya se borró del historial).' });
+            if (!p.clanId || (p.clanId !== war.attackerId && p.clanId !== war.defenderId)) {
+                return reply({ ok: false, error: 'Solo los miembros de los clanes que pelearon pueden ver esta guerra.' });
+            }
+            reply({
+                ok: true,
+                war: {
+                    id: war._id,
+                    attackerName: war.attackerName, defenderName: war.defenderName,
+                    winner: war.winner, winnerName: war.winnerName,
+                    mySide: p.clanId === war.attackerId ? 'a' : 'b',
+                    rosterA: war.rosterA, rosterB: war.rosterB, duels: war.duels,
+                    reward: { money: CLAN_WAR_REWARD, fame: CLAN_WAR_FAME, xp: CLAN_WAR_XP }
+                }
             });
         } catch (e) {
             console.error(e);
@@ -1828,8 +2127,6 @@ io.on('connection', (socket) => {
     });
 
     // ---------- CHAT DE CLAN ----------
-
-    // Historial del chat de MI clan (últimos 50 mensajes).
     socket.on('getClanChat', async (cb) => {
         const reply = typeof cb === 'function' ? cb : () => {};
         const p = online[socket.id];
@@ -1843,7 +2140,6 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Mensaje nuevo en el chat de clan: solo lo reciben los miembros de ese clan.
     socket.on('clanChat', async (text) => {
         const p = online[socket.id];
         if (!p || !p.clanId) return;
@@ -1852,7 +2148,7 @@ io.on('connection', (socket) => {
         if (!clean) return;
 
         const now = Date.now();
-        if (now - p.lastClanMsg < 700) return; // anti-spam.
+        if (now - p.lastClanMsg < 700) return;
         p.lastClanMsg = now;
 
         const clanId = p.clanId;
@@ -1870,7 +2166,7 @@ io.on('connection', (socket) => {
         if (!clean) return;
 
         const now = Date.now();
-        if (now - p.lastMsg < 700) return; // anti-spam.
+        if (now - p.lastMsg < 700) return;
         p.lastMsg = now;
 
         const msg = { name: p.name, text: clean, ts: now };
@@ -1883,8 +2179,7 @@ io.on('connection', (socket) => {
         const p = online[socket.id];
         delete online[socket.id];
         if (p) {
-            // Si estaba peleando, resolvemos la pelea YA para que cerrar la página no sirva para escapar.
-            if (p.fight) endFight(socket.id, p, true);
+            if (p.fight) endFight(socket.id, p, true); // cerrar la página no sirve para escapar de una derrota.
             try { await saveProgress([p]); } catch (e) { console.error(e); }
             await refreshTop();
             broadcastSlow();
@@ -1899,14 +2194,15 @@ io.on('connection', (socket) => {
 let ticks = 0;
 setInterval(async () => {
     const now = Date.now();
-    const entries = Object.entries(online); // pares [socketId, jugador].
+    const entries = Object.entries(online);
 
     entries.forEach(([id, p]) => {
         p.score++;                  // +1 punto por segundo (ranking de actividad).
-        refreshEnergy(p, now);      // recarga de energía.
-        refreshSearch(p, now);      // recarga de cargas de búsqueda.
+        // Bolsa de dinero: suma mientras estás conectado (con tope si POUCH_MAX es mayor que 0).
+        p.pouch = POUCH_MAX ? Math.min(POUCH_MAX, p.pouch + POUCH_PER_SECOND) : p.pouch + POUCH_PER_SECOND;
+        refreshEnergy(p, now);
+        refreshSearch(p, now);
 
-        // Si pasó la hora, la tienda se actualiza sola y se lo avisamos.
         if (refreshShop(p, now)) {
             io.to(id).emit('shop', shopPayload(p, now));
             saveProgress([p]).catch(console.error);
@@ -1915,17 +2211,16 @@ setInterval(async () => {
         const finished = finishMissionIfDone(p, now);
         if (finished) {
             io.to(id).emit('missionDone', finished);
-            if (finished.items.length) sendInventory(id, p); // cayó algún objeto.
+            if (finished.items.length) sendInventory(id, p);
             saveProgress([p]).catch(console.error);
         }
 
-        sendState(id, p, now);      // estado personal actualizado.
+        sendState(id, p, now);
     });
 
-    broadcast(); // ranking de actividad para todos.
+    broadcast();
 
     ticks++;
-    // Cada 10 segundos: guardamos a todos, refrescamos rankings y los mandamos.
     if (ticks % 10 === 0) {
         try { await saveProgress(entries.map(([, p]) => p)); } catch (e) { console.error(e); }
         await refreshTop();
@@ -1943,32 +2238,27 @@ async function safely(label, fn) {
 }
 
 async function start() {
-    await client.connect();                           // conecta a MongoDB.
+    await client.connect();
     const db = client.db('juego');
-    users = db.collection('users');                   // usuarios y todo su progreso.
-    messages = db.collection('messages');             // chat global (los mensajes se borran solos).
-    clans = db.collection('clans');                   // clanes.
-    clanMessages = db.collection('clanMessages');     // chat de clan.
-    notifications = db.collection('notifications');   // avisos de ataques recibidos.
+    users = db.collection('users');
+    messages = db.collection('messages');
+    clans = db.collection('clans');
+    clanMessages = db.collection('clanMessages');
+    notifications = db.collection('notifications');
+    clanWars = db.collection('clanWars');             // guerras de clanes y sus repeticiones.
 
     await safely('chat global', async () => {
-        await messages.updateMany(
-            { createdAt: { $exists: false } },
-            [{ $set: { createdAt: { $toDate: '$ts' } } }]
-        );
+        await messages.updateMany({ createdAt: { $exists: false } }, [{ $set: { createdAt: { $toDate: '$ts' } } }]);
         await messages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CHAT_TTL_SECONDS });
     });
     await safely('chat de clan', async () => {
         await clanMessages.createIndex({ createdAt: 1 }, { expireAfterSeconds: CLAN_CHAT_TTL_SECONDS });
         await clanMessages.createIndex({ clanId: 1, ts: -1 });
     });
-    // Notificaciones: se borran solas a los 7 días, y se buscan rápido por usuario.
     await safely('notificaciones', async () => {
         await notifications.createIndex({ createdAt: 1 }, { expireAfterSeconds: NOTIF_TTL_SECONDS });
         await notifications.createIndex({ userId: 1, createdAt: -1 });
     });
-
-    // Nombres cambiables: a los usuarios y clanes viejos les agregamos "nameKey".
     await safely('migración de usuarios', async () => {
         await users.updateMany({ nameKey: { $exists: false } }, [{ $set: { nameKey: '$_id' } }]);
         await users.createIndex({ nameKey: 1 }, { unique: true, sparse: true });
@@ -1978,6 +2268,17 @@ async function start() {
         await clans.createIndex({ nameKey: 1 }, { unique: true, sparse: true });
     });
     await safely('índice de clanId', () => users.createIndex({ clanId: 1 }));
+
+    // Guerras de clanes: índices, limpieza de guerras que quedaron a medias y reprogramación de las que
+    // estaban en cuenta regresiva cuando el servidor se reinició.
+    await safely('guerras de clanes', async () => {
+        await clanWars.createIndex({ createdAt: 1 }, { expireAfterSeconds: CLAN_WAR_TTL_SECONDS });
+        await clanWars.createIndex({ attackerId: 1, createdAt: -1 });
+        await clanWars.createIndex({ defenderId: 1, createdAt: -1 });
+        await clanWars.updateMany({ status: 'running' }, { $set: { status: 'failed' } });
+        const pending = await clanWars.find({ status: 'prep' }).toArray();
+        pending.forEach(w => scheduleClanWar(w._id, w.startAt));
+    });
 
     await refreshTop();
     server.listen(process.env.PORT || 3000, () => console.log('Servidor corriendo'));
