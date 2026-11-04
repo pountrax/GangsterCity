@@ -15,7 +15,7 @@ const RESET_STATS_COST = 500;    // reinicio de estadísticas: 1ª vez 500, 2ª 
 
 // ---------- Bolsa de dinero (ganancias de gangster) ----------
 const POUCH_PER_SECOND = 1;      // pesos que suma la bolsa por segundo (solo mientras estás conectado).
-const POUCH_MAX = 0;             // tope de la bolsa (0 = sin tope).
+const POUCH_MAX = 15000;             // tope de la bolsa (0 = sin tope).
 
 // ---------- Clanes ----------
 const CLAN_JOIN_LEVEL = 5;       // nivel mínimo para unirse a un clan.
@@ -49,12 +49,12 @@ const NOTIF_TTL_SECONDS = 7 * 24 * 60 * 60;     // notificaciones: 7 días.
 const NOTIF_MAX = 30;                           // cuántas notificaciones se muestran como máximo.
 
 // ---------- Guerra 1 contra 1 ----------
-const WAR_ENERGY = 15;        // energía que cuesta pelear.
+const WAR_ENERGY = 0;        // energía que cuesta pelear.
 const WAR_REWARD = 300;       // dinero base al vencer (se ajusta según la diferencia de nivel).
 const WAR_TURN_MS = 1400;     // cada cuánto se muestra un golpe (milisegundos).
 const WAR_MAX_ACTIONS = 60;   // tope de golpes por pelea (evita peleas eternas).
 const HP_PER_VIDA = 5;        // cada punto de Vida da 5 HP en combate.
-const CRIT_MULT = 2;          // un crítico pega el doble.
+const CRIT_MULT = 1.5;          // un crítico pega el doble.
 const GRENADE_DAMAGE = 35;    // daño de una granada (no se esquiva ni se reduce con aguante).
 const GRENADES_PER_FIGHT = 1; // granadas que se lanzan por pelea.
 
@@ -113,7 +113,7 @@ const ITEMS = {
     granada: {
         name: 'Granada', emoji: '💣', img: 'img/items/granada.png',
         desc: 'Se lanza en tu primer ataque: 35 de daño que no se esquiva. Se gasta 1 por pelea.',
-        kind: 'grenade', w: 2, h: 1, stackMax: 5, shopQty: 5
+        kind: 'grenade', w: 2, h: 1, stackMax: 30, shopQty: 5
     }
 };
 Object.keys(ITEMS).forEach(id => { ITEMS[id].id = id; }); // cada objeto conoce su propio ID.
