@@ -1,0 +1,145 @@
+/* ============================================================
+   css/inventory.css — Inventario: estadísticas, reinicio, mochila y maletín de guerra
+   ============================================================ */
+
+.inv-pane { display: none; }
+.inv-pane.active { display: block; }
+
+/* ---------- Estadísticas ---------- */
+/* Cada fila: nombre + efecto | valor | botón "+" | botón 💵 */
+.stat-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-info { display: flex; flex-direction: column; min-width: 0; }
+.stat-name { font-size: 15px; }
+.stat-effect { font-size: 12px; color: var(--muted); }
+.stat-value { font-weight: bold; min-width: 32px; text-align: right; }
+.stat-value .bonus { color: var(--green); font-size: 13px; }   /* extra que da el maletín */
+.plus-btn {
+    width: 32px;
+    height: 32px;
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    border-radius: 8px;
+    background: var(--green);
+    color: #0b1a10;
+    cursor: pointer;
+}
+.plus-btn:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; opacity: 0.5; }
+.buy-btn {
+    height: 32px;
+    padding: 0 8px;
+    font-size: 13px;
+    white-space: nowrap;
+    color: white;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.buy-btn:disabled { background: var(--bg); color: var(--muted); cursor: not-allowed; opacity: 0.5; }
+
+/* Reiniciar estadísticas */
+.reset-row { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.reset-row .muted { margin-top: 6px; }
+
+/* ---------- Casillas de objetos ---------- */
+.slot {
+    width: 100%;
+    max-width: 64px;
+    aspect-ratio: 1;               /* siempre cuadrada */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    background: var(--panel2);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+}
+.slot.filled { border-style: solid; border-color: var(--accent); }
+
+/* ---------- Mochila ---------- */
+#bagBox { margin-top: 16px; }
+#bagGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 8px; }
+#bagGrid .slot { max-width: none; position: relative; }
+#bagGrid .slot.filled { cursor: grab; touch-action: none; user-select: none; }
+#bagGrid .slot.selected, .case-item.selected { box-shadow: 0 0 0 3px #fde047; }
+.qty {
+    position: absolute;
+    right: 3px;
+    bottom: 1px;
+    padding: 0 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 6px;
+    pointer-events: none;
+}
+#itemInfo { margin-top: 10px; }
+.item-card {
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.item-card p { margin: 4px 0 8px; font-size: 14px; color: var(--muted); }
+.item-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#invMsg { min-height: 18px; }
+
+/* ---------- Maletín de guerra ---------- */
+#caseWrap { margin: 10px 0; }
+#caseGrid {
+    position: relative;
+    width: min(100%, 330px);
+    aspect-ratio: 1;
+    display: grid;
+    grid-template-columns: repeat(var(--size, 3), 1fr);
+    grid-template-rows: repeat(var(--size, 3), 1fr);
+    background: var(--bg);
+    outline: 3px solid var(--accent);
+    border-radius: 4px;
+    touch-action: none;
+}
+.case-cell { border: 1px solid var(--border); background: rgba(255, 255, 255, 0.03); }
+.case-cell.ok { background: rgba(34, 197, 94, 0.45); }
+.case-cell.bad { background: rgba(239, 68, 68, 0.45); }
+.case-item {
+    position: absolute;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel2);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    overflow: hidden;
+}
+.case-item .icon-emoji { font-size: calc(var(--cell, 60px) * var(--minside, 1) * 0.6); }
+.case-actions { margin-top: 10px; }
+
+/* Objeto que se está arrastrando */
+.drag-ghost {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(42, 48, 59, 0.9);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    opacity: 0.92;
+    pointer-events: none;
+}

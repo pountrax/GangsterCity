@@ -1,0 +1,22 @@
+/* ============================================================
+   css/shop.css — Tienda
+   ============================================================ */
+
+#shopOffers { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 12px 0; }
+.offer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px;
+    text-align: center;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.offer-icon { width: 64px; height: 64px; }
+.offer-icon .icon-emoji { font-size: 44px; }
+.offer-name { font-weight: bold; }
+.offer-desc { font-size: 12px; color: var(--muted); }
+.offer-price { font-weight: bold; color: var(--accent); }
+.shop-actions { display: flex; gap: 8px; flex-wrap: wrap; }

@@ -1,0 +1,206 @@
+/* ============================================================
+   css/clan.css — Clan: ficha, miembros y rangos, reglas, chat del clan y guerra de clanes
+   ============================================================ */
+
+.clan-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.clan-card p { margin: 4px 0 0; }
+.clan-emblem { font-size: 40px; }
+.clan-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+#clanMsg { min-height: 18px; }
+#renameClanForm { margin-top: 12px; }
+
+/* Solo el panel con la clase "active" se ve */
+.clan-pane { display: none; }
+.clan-pane.active { display: block; }
+
+/* ---------- Miembros ---------- */
+/* Cada fila: nombre | nivel | rango | controles */
+.member-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;               /* en el celular los botones bajan a otra línea */
+    gap: 8px 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+}
+.member-row:last-child { border-bottom: none; }
+.member-name { flex: 1; min-width: 140px; font-size: 15px; word-break: break-word; }
+.member-icon { display: inline-block; width: 24px; text-align: center; margin-right: 4px; }
+.member-level { color: var(--muted); font-size: 14px; }
+.member-actions { display: flex; gap: 6px; }
+
+/* Etiqueta del rango */
+.role-tag {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+}
+.role-tag.lider { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: bold; }
+.role-tag.oficial { color: var(--violet); border-color: var(--violet); }
+.role-tag.colider { color: #f9a8d4; border-color: #f9a8d4; }
+
+/* Desplegable para cambiar el rango de un miembro */
+.role-select {
+    padding: 6px 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* ---------- Reglas: texto para los miembros y editor para líder y colíderes ---------- */
+#rulesView {
+    min-height: 120px;
+    padding: 12px;
+    white-space: pre-wrap;          /* respeta los saltos de línea que escribió el líder */
+    overflow-wrap: anywhere;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+#rulesView.empty { color: var(--muted); }
+#rulesForm { display: flex; flex-direction: column; gap: 8px; }
+#rulesInput {
+    width: 100%;
+    min-height: 180px;
+    padding: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    resize: vertical;
+}
+.rules-count { font-size: 12px; color: var(--muted); text-align: right; }
+
+/* ---------- Chat del clan (mismo estilo que el chat global) ---------- */
+#clanChatLog {
+    height: 260px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 15px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#clanChatLog .msg { margin-bottom: 4px; overflow-wrap: anywhere; }
+#clanChatLog .time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+#clanChatLog .mine strong { color: var(--accent); }
+#clanChatForm { margin-top: 8px; }
+
+/* ---------- Guerra de clanes: clanes rivales e historial ---------- */
+#cwPrepBox {
+    margin: 10px 0;
+    padding: 10px 12px;
+    font-weight: bold;
+    text-align: center;
+    background: #3b1d1d;
+    border: 1px solid #ef4444;
+    border-radius: 10px;
+}
+.cw-lock { color: var(--muted); font-size: 12px; }
+.cw-hist {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.cw-hist small { display: block; color: var(--muted); }
+.cw-hist.won { border-left: 4px solid var(--green); }
+.cw-hist.lost { border-left: 4px solid #ef4444; }
+
+/* ---------- Repetición de la guerra de clanes ---------- */
+.cw-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.cw-rosters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.cw-rname { margin-bottom: 4px; font-size: 13px; font-weight: bold; word-break: break-word; }
+.roster { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.chip.active { border-color: var(--accent); box-shadow: 0 0 8px rgba(245, 158, 11, 0.8); }
+.chip.dead { opacity: 0.35; text-decoration: line-through; filter: grayscale(1); }
+
+/* Arena de la repetición (igual que la de la guerra normal) */
+#cwArena {
+    position: relative;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+    align-items: stretch;
+    padding: 14px 10px;
+    margin-bottom: 12px;
+    background: radial-gradient(circle at center, #2a303b 0%, var(--bg) 85%);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+#cwLeft.acting { animation: lungeRight 0.6s ease-in-out; }
+#cwRight.acting { animation: lungeLeft 0.6s ease-in-out; }
+#cwArena.flash { animation: arenaFlash 0.5s; }
+
+#cwBanner {
+    margin-bottom: 12px;
+    padding: 10px;
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+#cwBanner.win { color: #fde047; border-color: #fde047; }
+#cwBanner.lose { color: #f87171; border-color: #f87171; }
+#cwBanner.extra { color: var(--accent); border-color: var(--accent); }
+
+.cw-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+#cwLog {
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 8px;
+    font-size: 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+#cwLog div { padding: 3px 0; border-bottom: 1px dashed var(--border); }
+#cwLog div:last-child { border-bottom: none; }
+#cwLog .l-me { color: #86efac; }
+#cwLog .l-rival { color: #fca5a5; }
+#cwLog .l-sys { color: var(--muted); }
+#cwLog .l-crit { font-weight: bold; }
+
+/* ---------- Celulares ---------- */
+@media (max-width: 500px) {
+    #clanChatLog { height: 200px; font-size: 14px; }
+    #cwArena { padding: 10px 6px; gap: 4px; }
+    .cw-rosters { grid-template-columns: 1fr; }
+}
