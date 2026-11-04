@@ -1,0 +1,100 @@
+/* ============================================================
+   css/layout.css — Diseño general: columna izquierda (personaje y menú) + centro
+   ============================================================ */
+
+#layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;   /* izquierda fija, centro flexible */
+    gap: 16px;
+    align-items: start;
+}
+/* Los recuadros dentro del layout no llevan margen abajo: el "gap" ya separa */
+#layout .panel { margin-bottom: 0; }
+#sidebar { display: flex; flex-direction: column; gap: 16px; }
+#content { min-height: 460px; }
+
+/* ---------- Recuadro del personaje ---------- */
+.profile-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+#avatar {
+    width: 72px;
+    height: 72px;
+    flex-shrink: 0;                /* que no se achique */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    font-weight: bold;
+    background: var(--panel2);
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+}
+.profile-name { font-size: 18px; font-weight: bold; word-break: break-word; }
+.profile-class { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.profile-level { color: var(--accent); font-size: 14px; margin-top: 2px; }
+
+.stat { margin-bottom: 10px; }
+.stat-label { font-weight: bold; margin-bottom: 4px; font-size: 15px; }
+.stat-label small { font-weight: normal; color: var(--muted); margin-left: 6px; }
+
+/* Panel que se abre al tocar "Editar perfil" */
+#editProfile {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+#editProfile label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+#editProfile input {
+    width: 100%;
+    padding: 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+#editProfile input:disabled { opacity: 0.6; cursor: not-allowed; }
+#editNameForm { display: flex; flex-direction: column; gap: 8px; }
+#editProfile .muted { margin: 0; }
+
+/* ---------- Menú de navegación ---------- */
+#nav { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+.nav-btn {
+    position: relative;            /* para ubicar el globito rojo */
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    font-size: 16px;
+    text-align: left;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.nav-btn:hover { border-color: var(--accent); }
+.nav-btn.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
+.nav-icon { font-size: 20px; }
+
+/* ---------- Celulares y pantallas chicas ---------- */
+@media (max-width: 800px) {
+    /* Una sola columna: personaje arriba, contenido abajo */
+    #layout { grid-template-columns: 1fr; }
+
+    /* Navegación en fila: los botones lado a lado, con el icono arriba del texto */
+    #nav { flex-direction: row; gap: 6px; padding: 8px; }
+    .nav-btn {
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 4px;
+        font-size: 12px;
+        text-align: center;
+    }
+    /* El globito rojo pasa a la esquina del botón */
+    .badge { position: absolute; top: 2px; right: 4px; margin-left: 0; }
+    #content { min-height: 0; }
+}

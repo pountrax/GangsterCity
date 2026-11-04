@@ -1,0 +1,44 @@
+/* ============================================================
+   css/missions.css — Misiones y bolsa de dinero
+   ============================================================ */
+
+/* ---------- Bolsa de dinero ---------- */
+#pouchRow { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+#pouchBtn {
+    flex-shrink: 0;
+    padding: 6px 14px;
+    font-size: 15px;
+    font-weight: bold;
+    color: #1a1a1a;
+    background: var(--accent);
+    border: none;
+    border-radius: 999px;
+    cursor: pointer;
+}
+#pouchBtn:disabled { opacity: 0.45; cursor: not-allowed; }
+#pouchBtn.pop { animation: pouchPop 0.45s; }
+@keyframes pouchPop { 40% { transform: scale(1.25) rotate(-6deg); } }
+#pouchText { margin: 0; font-size: 13px; color: var(--muted); }
+#pouchMsg { min-height: 18px; margin: 0 0 8px; }
+
+/* ---------- Misiones ---------- */
+#missionActive { margin-bottom: 12px; }
+#missionActive p { margin: 0 0 6px; font-size: 14px; }
+#missionList { display: flex; flex-direction: column; gap: 8px; }
+.mission-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.mission-btn:hover:not(:disabled) { border-color: var(--accent); }
+.mission-btn span { font-size: 13px; color: var(--muted); }
+.mission-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+#missionMsg { min-height: 18px; margin: 10px 0 0; font-size: 14px; }

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <!-- Hace que el celular use su ancho real (necesaria para el diseño responsive) -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GangsterCity</title>
+
+    <!-- Estilos (cada archivo se ocupa de una parte del juego). El orden importa. -->
+    <link rel="stylesheet" href="css/base.css">
+    <link rel="stylesheet" href="css/login.css">
+    <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/missions.css">
+    <link rel="stylesheet" href="css/inventory.css">
+    <link rel="stylesheet" href="css/shop.css">
+    <link rel="stylesheet" href="css/war.css">
+    <link rel="stylesheet" href="css/clan.css">
+    <link rel="stylesheet" href="css/chat.css">
+    <link rel="stylesheet" href="css/rankings.css">
+    <link rel="stylesheet" href="css/notifications.css">
+
+    <!-- Librería de Socket.IO: la conexión en tiempo real con el servidor -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+</head>
+<body>
+    <!-- #app: contenedor general. Limita el ancho máximo y lo centra -->
+    <div id="app">
+
+        <!-- ================== PANTALLA DE INGRESO ================== -->
+        <div id="login">
+            <form id="loginForm">
+                <h2>Entrar al juego</h2>
+                <p class="hint">Si el usuario no existe, se crea automáticamente.</p>
+                <input id="username" type="text" placeholder="Usuario" maxlength="20" autocomplete="username" required>
+                <input id="password" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+                <button type="submit" id="loginBtn">Entrar</button>
+                <p id="loginError"></p>
+            </form>
+        </div>
+
+        <!-- ================== JUEGO (se muestra al iniciar sesión) ================== -->
+        <div id="game" hidden>
+
+            <!-- ===== Campanita de notificaciones (arriba a la derecha, siempre visible) ===== -->
+            <div id="notifBox">
+                <button id="notifBtn" type="button" title="Notificaciones">
+                    🔔<span id="notifBadge" class="badge" hidden>0</span>
+                </button>
+                <div id="notifPanel" hidden>
+                    <div class="notif-head">
+                        <strong>Notificaciones</strong>
+                        <button id="notifClose" type="button">✖</button>
+                    </div>
+                    <!-- La lista la crea js/notifications.js -->
+                    <div id="notifList"></div>
+                </div>
+            </div>
+
+            <!-- Aviso de guerra de clanes (visible en cualquier pestaña) -->
+            <div id="clanWarAlert" hidden>
+                <span id="clanWarAlertText"></span>
+                <button id="clanWarAlertBtn" type="button"></button>
+                <button id="clanWarAlertClose" type="button" title="Cerrar">✖</button>
+            </div>
+
+            <!-- #layout: dos columnas (izquierda: personaje y menú / derecha: contenido) -->
+            <div id="layout">
+
+                <!-- ----- COLUMNA IZQUIERDA ----- -->
+                <aside id="sidebar">
+
+                    <!-- Recuadro del personaje -->
+                    <div class="panel" id="profile">
+                        <div class="profile-head">
+                            <div id="avatar">?</div>
+                            <div>
+                                <div id="nameValue" class="profile-name">---</div>
+                                <div id="classValue" class="profile-class">---</div>
+                                <div class="profile-level">Nivel <span id="levelValue">1</span></div>
+                            </div>
+                        </div>
+
+                        <!-- Experiencia con su barra -->
+                        <div class="stat">
+                            <div class="stat-label">✨ XP: <span id="xpValue">0</span>/<span id="xpMax">100</span></div>
+                            <div class="bar"><div id="xpBar" class="bar-fill xp-fill"></div></div>
+                        </div>
+
+                        <!-- Dinero -->
+                        <div class="stat">
+                            <div class="stat-label">💵 Dinero: <span id="moneyValue">0</span></div>
+                        </div>
+
+                        <!-- Energía con su barra -->
+                        <div class="stat">
+                            <div class="stat-label">
+                                ⚡ Energía: <span id="energyValue">0</span>/<span id="energyMax">100</span>
+                                <small id="energyTimer"></small>
+                            </div>
+                            <div class="bar"><div id="energyBar" class="bar-fill"></div></div>
+                        </div>
+
+                        <!-- Fama -->
+                        <div class="stat">
+                            <div class="stat-label">⭐ Fama: <span id="fameValue">0</span></div>
+                        </div>
+
+                        <!-- Tiempo jugado (ranking de actividad) -->
+                        <div class="stat">
+                            <div class="stat-label">⏱ Tiempo jugado: <span id="scoreValue">0</span></div>
+                        </div>
+
+                        <!-- Botón de editar perfil + panel que se abre/cierra -->
+                        <button id="editProfileBtn" class="action-btn full" type="button">✏️ Editar perfil</button>
+                        <div id="editProfile" hidden>
+                            <form id="editNameForm">
+                                <label>Nombre de usuario
+                                    <input id="editName" type="text" maxlength="20" autocomplete="off">
+                                </label>
+                                <button type="submit" id="editNameBtn" class="action-btn full">Guardar nombre</button>
+                            </form>
+                            <p class="muted" id="editNameHint"></p>
+                            <p class="muted" id="editMsg"></p>
+
+                            <label>Foto de perfil
+                                <input type="file" accept="image/*" disabled>
+                            </label>
+                            <p class="muted">🚧 La foto de perfil llegará próximamente.</p>
+                        </div>
+                    </div>
+
+                    <!-- Menú de navegación. data-tab indica qué sección abre cada botón -->
+                    <nav class="panel" id="nav">
+                        <button class="nav-btn active" data-tab="misiones"><span class="nav-icon">🎯</span> Misiones</button>
+                        <button class="nav-btn" data-tab="inventario">
+                            <span class="nav-icon">🎒</span> Inventario
+                            <span id="inventoryBadge" class="badge" hidden>0</span>
+                        </button>
+                        <button class="nav-btn" data-tab="guerra"><span class="nav-icon">⚔️</span> Guerra</button>
+                        <button class="nav-btn" data-tab="tienda"><span class="nav-icon">🛒</span> Tienda</button>
+                        <button class="nav-btn" data-tab="clan"><span class="nav-icon">🏴</span> Clan</button>
+                    </nav>
+                </aside>
+
+                <!-- ----- CENTRO: contenido de la sección elegida ----- -->
+                <main id="content" class="panel">
+
+                    <!-- ===== MISIONES ===== -->
+                    <section id="tab-misiones" class="tab active">
+                        <h2>Misiones</h2>
+
+                        <!-- Bolsa de dinero: ganancias de gangster -->
+                        <div id="pouchRow">
+                            <button id="pouchBtn" type="button" title="Reclamar tus ganancias">💰 <span id="pouchValue">0</span></button>
+                            <p id="pouchText"></p>
+                        </div>
+                        <p id="pouchMsg" class="muted"></p>
+
+                        <div class="placeholder">🖼️ Acá irá la imagen de misiones</div>
+
+                        <div id="missionActive" hidden>
+                            <p id="missionActiveText"></p>
+                            <div class="bar"><div id="missionBar" class="bar-fill mission-fill"></div></div>
+                        </div>
+                        <div id="missionList"></div>
+                        <p id="missionMsg"></p>
+                    </section>
+
+                    <!-- ===== INVENTARIO ===== -->
+                    <section id="tab-inventario" class="tab">
+                        <h2>Inventario</h2>
+
+                        <!-- Subpestañas: Inventario (estadísticas) / Maletín de guerra -->
+                        <div class="sub-tabs">
+                            <button class="sub-tab active" data-invpane="stats" type="button">🎒 Inventario</button>
+                            <button class="sub-tab" data-invpane="case" type="button">💼 Maletín de guerra</button>
+                        </div>
+
+                        <!-- Subpestaña 1: estadísticas -->
+                        <div id="invPane-stats" class="inv-pane active">
+                            <div class="stats-box">
+                                <div class="stats-head">
+                                    <h3>Estadísticas</h3>
+                                    <div class="points-badge">Puntos disponibles: <strong id="statPointsValue">0</strong></div>
+                                </div>
+                                <div id="statsList"></div>
+                                <p id="statsMsg" class="muted"></p>
+
+                                <!-- Reiniciar estadísticas -->
+                                <div class="reset-row">
+                                    <button id="resetStatsBtn" class="action-btn" type="button">🔄 Reiniciar estadísticas</button>
+                                    <p class="muted" id="resetInfo"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Subpestaña 2: maletín de guerra -->
+                        <div id="invPane-case" class="inv-pane">
+                            <p class="muted" id="caseHint"></p>
+                            <div id="caseWrap"><div id="caseGrid"></div></div>
+                            <div class="case-actions">
+                                <button id="expandCaseBtn" class="action-btn" type="button">Expandir maletín</button>
+                            </div>
+                        </div>
+
+                        <!-- Mochila: siempre visible debajo (así se puede arrastrar al maletín) -->
+                        <div id="bagBox" class="stats-box">
+                            <div class="stats-head">
+                                <h3>Mochila <small id="bagCount" class="muted"></small></h3>
+                            </div>
+                            <div id="bagGrid"></div>
+                            <!-- Info del objeto seleccionado con sus botones -->
+                            <div id="itemInfo"></div>
+                            <p id="invMsg" class="muted"></p>
+                        </div>
+                    </section>
+
+                    <!-- ===== GUERRA ===== -->
+                    <section id="tab-guerra" class="tab">
+                        <h2>Guerra</h2>
+                        <p class="muted" id="warInfo"></p>
+
+                        <!-- Arena: tu tarjeta | VS | tarjeta del rival -->
+                        <div id="arena">
+                            <div class="fighter" id="fighterMe">
+                                <div class="f-avatar">?</div>
+                                <div class="f-name">---</div>
+                                <div class="f-sub"></div>
+                                <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                <div class="f-hp-text">0/0</div>
+                                <div class="f-stats"></div>
+                            </div>
+
+                            <div class="vs">VS</div>
+
+                            <div class="fighter empty" id="fighterRival">
+                                <div class="f-avatar">?</div>
+                                <div class="f-name">Sin rival</div>
+                                <div class="f-sub"></div>
+                                <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                <div class="f-hp-text">-</div>
+                                <div class="f-stats"></div>
+                            </div>
+                        </div>
+
+                        <p id="rivalNote" class="muted"></p>
+                        <div id="warBanner" hidden></div>
+
+                        <div id="warActions">
+                            <button id="searchRivalBtn" class="action-btn" type="button">🔍 Buscar rival</button>
+                            <button id="fightBtn" class="action-btn danger" type="button" hidden>⚔️ Pelear</button>
+                        </div>
+                        <p id="searchInfo" class="muted"></p>
+                        <p id="warMsg" class="muted"></p>
+
+                        <!-- Buscar a un jugador puntual por su nombre -->
+                        <h3>Desafiar a un jugador</h3>
+                        <form id="playerSearchForm" class="inline-form">
+                            <input id="playerSearchInput" type="text" maxlength="20" placeholder="Buscar jugador por nombre..." autocomplete="off">
+                            <button type="submit" class="action-btn">🔎 Buscar</button>
+                        </form>
+                        <div id="playerResults"></div>
+
+                        <h3>Registro del combate</h3>
+                        <div id="warLog"></div>
+                    </section>
+
+                    <!-- ===== TIENDA ===== -->
+                    <section id="tab-tienda" class="tab">
+                        <h2>Tienda</h2>
+                        <p class="muted" id="shopInfo"></p>
+                        <!-- Las ofertas las crea js/shop.js -->
+                        <div id="shopOffers"></div>
+                        <p id="shopTimer" class="muted"></p>
+                        <div class="shop-actions">
+                            <button id="shopManualBtn" class="action-btn" type="button">🔄 Recargar tienda</button>
+                        </div>
+                        <p id="shopManualInfo" class="muted"></p>
+                        <p id="shopMsg" class="muted"></p>
+                    </section>
+
+                    <!-- ===== CLAN (FAMILIA) ===== -->
+                    <section id="tab-clan" class="tab">
+                        <h2>Clan</h2>
+
+                        <!-- MI CLAN (solo se ve si pertenecés a uno) -->
+                        <div id="myClanBox" hidden>
+                            <div class="clan-card">
+                                <div class="clan-emblem">🏴</div>
+                                <div>
+                                    <strong id="clanName">---</strong>
+                                    <p class="muted" id="clanInfo"></p>
+                                </div>
+                            </div>
+
+                            <!-- Cambiar el nombre del clan (solo lo ve el líder) -->
+                            <form id="renameClanForm" class="inline-form" hidden>
+                                <input id="renameClanInput" type="text" maxlength="20" placeholder="Nuevo nombre del clan" autocomplete="off">
+                                <button type="submit" class="action-btn">Cambiar nombre</button>
+                            </form>
+
+                            <!-- Subpestañas del clan: Miembros / Chat / Reglas / Guerra de clan -->
+                            <div class="sub-tabs">
+                                <button class="sub-tab active" data-clanpane="miembros" type="button">👥 Miembros</button>
+                                <button class="sub-tab" data-clanpane="chat" type="button">💬 Chat del clan</button>
+                                <button class="sub-tab" data-clanpane="reglas" type="button">📜 Reglas</button>
+                                <button class="sub-tab" data-clanpane="guerra" type="button">⚔️ Guerra de clan</button>
+                            </div>
+
+                            <!-- Subpestaña 1: miembros -->
+                            <div id="clanPane-miembros" class="clan-pane active">
+                                <div class="stats-box">
+                                    <div class="stats-head">
+                                        <h3>Miembros</h3>
+                                        <div class="points-badge">Tu rango: <strong id="myRoleValue">---</strong></div>
+                                    </div>
+                                    <div id="clanMembers"></div>
+                                </div>
+                                <div class="clan-actions">
+                                    <button id="leaveClanBtn" class="action-btn danger" type="button">Salir del clan</button>
+                                </div>
+                            </div>
+
+                            <!-- Subpestaña 2: chat del clan -->
+                            <div id="clanPane-chat" class="clan-pane">
+                                <div id="clanChatLog"></div>
+                                <form id="clanChatForm" class="inline-form">
+                                    <input id="clanChatInput" type="text" maxlength="200" placeholder="Escribile a tu clan..." autocomplete="off">
+                                    <button type="submit" class="action-btn">Enviar</button>
+                                </form>
+                            </div>
+
+                            <!-- Subpestaña 3: reglas de la familia -->
+                            <div id="clanPane-reglas" class="clan-pane">
+                                <div id="rulesView"></div>
+                                <form id="rulesForm" hidden>
+                                    <textarea id="rulesInput" maxlength="1000" placeholder="Escribí las reglas de tu familia..."></textarea>
+                                    <div class="rules-count" id="rulesCount">0/1000</div>
+                                    <button type="submit" class="action-btn">Guardar reglas</button>
+                                </form>
+                            </div>
+
+                            <!-- Subpestaña 4: guerra de clan -->
+                            <div id="clanPane-guerra" class="clan-pane">
+
+                                <!-- Lista: elegir clan rival e historial -->
+                                <div id="cwListBox">
+                                    <p class="muted" id="cwInfo"></p>
+
+                                    <!-- Cuenta regresiva (solo aparece si hay una guerra preparándose) -->
+                                    <div id="cwPrepBox" hidden></div>
+
+                                    <div id="cwAttackBox">
+                                        <h3>Elegir clan rival</h3>
+                                        <p class="muted" id="cwCanDeclare"></p>
+                                        <table class="simple-table">
+                                            <thead><tr><th>Clan</th><th>Miembros</th><th>Fama</th><th></th></tr></thead>
+                                            <tbody id="cwCandidates"></tbody>
+                                        </table>
+                                    </div>
+
+                                    <h3>Guerras anteriores</h3>
+                                    <div id="cwHistory"></div>
+                                    <p id="cwMsg" class="muted"></p>
+                                </div>
+
+                                <!-- Repetición de la guerra -->
+                                <div id="cwReplay" hidden>
+                                    <div class="cw-head">
+                                        <button id="cwBack" class="action-btn small neutral" type="button">← Volver</button>
+                                        <strong id="cwTitle"></strong>
+                                    </div>
+
+                                    <!-- Los dos equipos: una ficha por miembro (se apagan al caer) -->
+                                    <div class="cw-rosters">
+                                        <div><div class="cw-rname" id="cwNameA"></div><div class="roster" id="cwRosterA"></div></div>
+                                        <div><div class="cw-rname" id="cwNameB"></div><div class="roster" id="cwRosterB"></div></div>
+                                    </div>
+
+                                    <!-- Duelo actual -->
+                                    <div id="cwArena">
+                                        <div class="fighter empty" id="cwLeft">
+                                            <div class="f-avatar">?</div>
+                                            <div class="f-name">---</div>
+                                            <div class="f-sub"></div>
+                                            <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                            <div class="f-hp-text">-</div>
+                                            <div class="f-stats"></div>
+                                        </div>
+                                        <div class="vs">VS</div>
+                                        <div class="fighter empty" id="cwRight">
+                                            <div class="f-avatar">?</div>
+                                            <div class="f-name">---</div>
+                                            <div class="f-sub"></div>
+                                            <div class="f-hp"><div class="f-hp-fill"></div></div>
+                                            <div class="f-hp-text">-</div>
+                                            <div class="f-stats"></div>
+                                        </div>
+                                    </div>
+
+                                    <div id="cwBanner" hidden></div>
+                                    <div class="cw-controls">
+                                        <button id="cwPause" class="action-btn small" type="button">⏸ Pausa</button>
+                                        <button id="cwSpeed" class="action-btn small neutral" type="button">Velocidad x1</button>
+                                        <button id="cwSkip" class="action-btn small neutral" type="button">⏭ Saltar al final</button>
+                                    </div>
+                                    <div id="cwLog"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- CREAR CLAN (solo se ve si NO tenés clan) -->
+                        <div id="createClanBox">
+                            <h3>Crear clan</h3>
+                            <p class="muted" id="createClanReq">Requiere nivel 10.</p>
+                            <form id="createClanForm" class="inline-form">
+                                <input id="clanNameInput" type="text" maxlength="20" placeholder="Nombre del clan" autocomplete="off">
+                                <button type="submit" id="createClanBtn" class="action-btn" disabled>Crear</button>
+                            </form>
+                        </div>
+
+                        <!-- CLANES DISPONIBLES (solo se ve si NO tenés clan) -->
+                        <div id="joinClanBox">
+                            <h3>Clanes disponibles</h3>
+                            <p class="muted" id="joinClanReq">Requiere nivel 5 para unirse.</p>
+                            <table class="simple-table">
+                                <thead><tr><th>Clan</th><th>Miembros</th><th></th></tr></thead>
+                                <tbody id="clanJoinList"></tbody>
+                            </table>
+                        </div>
+
+                        <p id="clanMsg" class="muted"></p>
+                    </section>
+                </main>
+            </div>
+
+            <!-- ================== CHAT GLOBAL ================== -->
+            <div class="panel" id="chat">
+                <h2>Chat global</h2>
+                <div id="chatLog"></div>
+                <form id="chatForm">
+                    <input id="chatInput" type="text" placeholder="Escribí un mensaje..." maxlength="200" autocomplete="off">
+                    <button type="submit">Enviar</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ================== RANKINGS (visibles siempre, también antes de entrar) ================== -->
+        <section class="panel" id="ranking">
+            <h2>🏆 Rankings</h2>
+
+            <div id="rankTabs">
+                <button class="rank-tab active" data-rank="actividad">⏱ Actividad</button>
+                <button class="rank-tab" data-rank="clanes">🏴 Clanes</button>
+                <button class="rank-tab" data-rank="fama">⭐ Fama</button>
+            </div>
+
+            <div id="rank-actividad" class="rank-pane active">
+                <div class="score-wrap">
+                    <table id="scoreboard" class="board">
+                        <thead><tr><th>#</th><th>Usuario</th><th>Puntos</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="rank-clanes" class="rank-pane">
+                <div class="score-wrap">
+                    <table id="clanBoard" class="board">
+                        <thead><tr><th>#</th><th>Clan</th><th>Miembros</th><th>Fama</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="rank-fama" class="rank-pane">
+                <div class="score-wrap">
+                    <table id="fameBoard" class="board">
+                        <thead><tr><th>#</th><th>Usuario</th><th>Nivel</th><th>Fama</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Código del navegador. EL ORDEN IMPORTA: cada archivo puede usar lo que está arriba de él. -->
+    <script src="js/core.js"></script>          <!-- conexión y variables compartidas -->
+    <script src="js/utils.js"></script>         <!-- funciones de ayuda -->
+    <script src="js/profile.js"></script>       <!-- recuadro del personaje y editar perfil -->
+    <script src="js/session.js"></script>       <!-- login y reconexión -->
+    <script src="js/nav.js"></script>           <!-- menú entre secciones -->
+    <script src="js/rankings.js"></script>      <!-- rankings -->
+    <script src="js/stats.js"></script>         <!-- estadísticas y reinicio -->
+    <script src="js/inventory.js"></script>     <!-- mochila y maletín -->
+    <script src="js/shop.js"></script>          <!-- tienda -->
+    <script src="js/missions.js"></script>      <!-- misiones y bolsa de dinero -->
+    <script src="js/fx.js"></script>            <!-- animaciones de combate -->
+    <script src="js/war.js"></script>           <!-- guerra 1 contra 1 -->
+    <script src="js/notifications.js"></script> <!-- campanita -->
+    <script src="js/chat.js"></script>          <!-- chat global -->
+    <script src="js/clan.js"></script>          <!-- clan: miembros, reglas, chat -->
+    <script src="js/clanwar.js"></script>       <!-- guerra de clanes: panel y aviso -->
+    <script src="js/replay.js"></script>        <!-- repetición de la guerra de clanes -->
+    <script src="js/main.js"></script>          <!-- arranque (siempre el último) -->
+</body>
+</html>

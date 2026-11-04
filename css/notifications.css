@@ -1,0 +1,112 @@
+/* ============================================================
+   css/notifications.css — Campanita 🔔 (arriba a la derecha) y aviso de guerra de clanes
+   ============================================================ */
+
+/* ---------- Campanita ---------- */
+#notifBox { position: fixed; top: 10px; right: 10px; z-index: 1000; }
+#notifBtn {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    font-size: 22px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+#notifBtn .badge { position: absolute; top: -4px; right: -4px; margin: 0; }
+#notifBtn.ring { animation: bellRing 0.9s; }
+@keyframes bellRing {
+    0%, 100% { transform: rotate(0); }
+    15% { transform: rotate(20deg); }
+    30% { transform: rotate(-18deg); }
+    45% { transform: rotate(14deg); }
+    60% { transform: rotate(-9deg); }
+    75% { transform: rotate(4deg); }
+}
+#notifPanel {
+    position: absolute;
+    top: 54px;
+    right: 0;
+    width: min(92vw, 360px);
+    max-height: 70vh;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+.notif-head {
+    position: sticky;
+    top: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--panel2);
+    border-bottom: 1px solid var(--border);
+}
+.notif-head button { color: var(--text); background: none; border: none; font-size: 16px; cursor: pointer; }
+.notif-item { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.notif-item:last-child { border-bottom: none; }
+.notif-item.fresh { background: rgba(245, 158, 11, 0.14); }
+.notif-time { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.notif-toggle {
+    margin-top: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+.notif-log {
+    margin-top: 6px;
+    padding: 6px 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    font-size: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.notif-log div { padding: 2px 0; }
+.notif-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* ---------- Aviso de guerra de clanes (arriba, en cualquier pestaña) ---------- */
+#clanWarAlert {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    right: 66px;          /* deja lugar a la campanita */
+    max-width: 560px;
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    background: #3b1d1d;
+    border: 1px solid #ef4444;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+#clanWarAlertText { flex: 1; min-width: 150px; }
+#clanWarAlert button {
+    padding: 5px 10px;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+@media (max-width: 500px) {
+    #notifBtn { width: 42px; height: 42px; font-size: 20px; }
+    #clanWarAlert { font-size: 13px; }
+}

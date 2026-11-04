@@ -1,0 +1,38 @@
+/* ============================================================
+   css/login.css — Pantalla de ingreso
+   ============================================================ */
+
+#login { display: flex; justify-content: center; margin-bottom: 16px; }
+#loginForm {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 24px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 340px;
+}
+#loginForm h2 { text-align: center; margin: 0; }
+#loginForm .hint { margin: 0; font-size: 13px; color: var(--muted); text-align: center; }
+#loginForm input {
+    padding: 12px;
+    font-size: 16px;               /* 16px evita el zoom automático en iPhone */
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel2);
+    color: var(--text);
+    width: 100%;
+}
+#loginForm button {
+    padding: 12px;
+    font-size: 16px;
+    border: none;
+    border-radius: 6px;
+    background: var(--blue);
+    color: white;
+    cursor: pointer;
+}
+#loginForm button:disabled { opacity: 0.6; cursor: wait; }
+#loginError { margin: 0; color: var(--red); font-size: 14px; text-align: center; min-height: 18px; }

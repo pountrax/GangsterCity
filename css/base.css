@@ -1,0 +1,168 @@
+/* ============================================================
+   css/base.css — Lo que usan todas las pantallas: colores, botones, barras, tablas, pestañas
+   Los colores están guardados en variables para cambiarlos fácil.
+   ============================================================ */
+
+:root {
+    --bg: #14161b;        /* fondo de la página */
+    --panel: #1f232b;     /* fondo de los recuadros */
+    --panel2: #2a303b;    /* fondo de elementos dentro de recuadros */
+    --border: #3a4150;    /* bordes */
+    --text: #e8eaed;      /* texto principal */
+    --muted: #9aa3b2;     /* texto secundario */
+    --accent: #f59e0b;    /* color de acento (naranja) */
+    --green: #22c55e;
+    --blue: #2563eb;
+    --red: #f87171;
+    --violet: #a78bfa;    /* color de la experiencia */
+}
+
+/* box-sizing: el padding y el borde NO agrandan los elementos (evita desbordes) */
+* { box-sizing: border-box; }
+
+/* Todo elemento con el atributo "hidden" se oculta, pase lo que pase */
+[hidden] { display: none !important; }
+
+body {
+    margin: 0;
+    padding: 16px;                 /* margen general alrededor del juego */
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Arial, sans-serif;
+}
+
+h2 { margin: 0 0 12px; font-size: 20px; }
+h3 { margin: 16px 0 8px; font-size: 16px; }
+.muted { color: var(--muted); font-size: 14px; margin: 8px 0 0; }
+
+/* Contenedor general: ancho máximo y centrado */
+#app { max-width: 1100px; margin: 0 auto; }
+
+/* Recuadro genérico: lo usan todas las secciones */
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;           /* separación entre recuadros */
+}
+
+/* ---------- Barras de progreso: .bar es el fondo, .bar-fill es la parte llena ---------- */
+.bar { width: 100%; height: 14px; background: var(--panel2); border-radius: 8px; overflow: hidden; }
+.bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);          /* naranja = energía */
+    transition: width 0.4s linear;      /* movimiento suave */
+}
+.mission-fill { background: var(--green); }   /* verde = misión */
+.xp-fill { background: var(--violet); }       /* violeta = experiencia */
+
+/* ---------- Botones ---------- */
+.action-btn {
+    padding: 10px 16px;
+    font-size: 15px;
+    color: white;
+    background: var(--blue);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.action-btn:disabled { background: var(--panel2); color: var(--muted); cursor: not-allowed; }
+.action-btn.full { width: 100%; margin-top: 4px; }
+.action-btn.small { padding: 6px 12px; font-size: 14px; }
+.action-btn.danger { background: #b91c1c; }
+.action-btn.neutral { background: var(--border); }
+
+/* Globito rojo con una cantidad (puntos sin gastar, notificaciones) */
+.badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    line-height: 20px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background: #ef4444;
+    border-radius: 10px;
+}
+
+/* ---------- Cajas con título (estadísticas, mochila, miembros del clan) ---------- */
+.stats-box {
+    margin-bottom: 16px;
+    padding: 14px;
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+.stats-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.stats-head h3 { margin: 0; }
+.points-badge { font-size: 14px; color: var(--muted); }
+.points-badge strong { color: var(--accent); font-size: 18px; }
+
+/* ---------- Tablas simples y formularios de una línea ---------- */
+.simple-table { width: 100%; border-collapse: collapse; }
+.simple-table th, .simple-table td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+.simple-table th { background: var(--panel2); }
+
+.inline-form { display: flex; gap: 8px; }
+.inline-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+/* ---------- Secciones del centro: solo la que tiene la clase "active" se ve ---------- */
+.tab { display: none; }
+.tab.active { display: block; }
+
+/* Espacio vacío reservado para imágenes futuras */
+.placeholder {
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 12px;
+    margin-bottom: 16px;
+    color: var(--muted);
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+}
+
+/* ---------- Subpestañas (inventario y clan) ---------- */
+.sub-tabs { display: flex; gap: 8px; margin: 14px 0 12px; flex-wrap: wrap; }
+.sub-tab {
+    padding: 8px 14px;
+    font-size: 15px;
+    color: var(--text);
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+}
+.sub-tab:hover { border-color: var(--accent); }
+.sub-tab.active { background: var(--accent); color: #1a1a1a; font-weight: bold; border-color: var(--accent); }
+
+/* ---------- Iconos de objetos (emoji o imagen) ---------- */
+.icon { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.icon img { max-width: 86%; max-height: 86%; object-fit: contain; pointer-events: none; user-select: none; }
+.icon-emoji { font-size: 28px; line-height: 1; }
+.icon-emoji.flip { display: inline-block; transform: scaleX(-1); } /* la pistola emoji mira a la izquierda: la damos vuelta */
+
+/* Puntito verde de "conectado" */
+.dot { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 50%; background: var(--green); }
+
+/* ---------- Celulares ---------- */
+@media (max-width: 500px) {
+    body { padding: 8px; }
+    .panel { padding: 12px; }
+}
